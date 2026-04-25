@@ -1,0 +1,67 @@
+# Конфиг golangci-lint v2.
+# Документация: https://golangci-lint.run/docs/configuration/file/
+
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # Стандартный пресет включает: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+
+  enable:
+    # Безопасность — критично для криптокода
+    - gosec
+    # Стилистика и базовая корректность
+    - revive
+    # Цикломатическая сложность (борьба с длинными функциями)
+    - gocyclo
+    # Нерациональные присваивания и объявления
+    - prealloc
+    - unconvert
+    # Контекстные ошибки
+    - bodyclose
+    - errorlint
+    # Запрет os.Exit вне main и t.Fatal в горутинах
+    - gocheckcompilerdirectives
+
+  settings:
+    gocyclo:
+      # Срабатывает на функциях со сложностью >= 15
+      min-complexity: 15
+    gosec:
+      # Криптомир — много обращений к math/rand отчасти оправдано (в тестах).
+      # Реальные risks в crypto/rand — gosec их и так подсветит.
+      excludes: []
+    revive:
+      severity: warning
+      rules:
+        - name: var-naming
+        - name: exported
+        - name: unused-parameter
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+
+  exclusions:
+    rules:
+      # Тесты могут себе позволить:
+      # - длиннющие функции (table-driven с большими payload),
+      # - менее строгие проверки безопасности,
+      # - "magic numbers" (тестовые константы).
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - gosec
+          - gosmopolitan
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+  settings:
+    goimports:
+      local-prefixes:
+        - pqt

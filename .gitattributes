@@ -1,0 +1,15 @@
+# Принудительный LF для текстовых файлов вне зависимости от ОС автора.
+# Go-инструменты (gofmt) требуют LF.
+
+* text=auto eol=lf
+
+# Бинарные форматы — без преобразований
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.docx binary
+*.xlsx binary
+*.zip binary

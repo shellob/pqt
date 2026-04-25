@@ -1,0 +1,40 @@
+# Скомпилированные бинарники
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/bin/
+/build/
+/dist/
+
+# Test binary, собранный через `go test -c`
+*.test
+
+# Покрытие тестами
+*.out
+coverage.*
+
+# Vendor (не используем)
+vendor/
+
+# Workspace files Go
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+
+# Локальные env-файлы (могут содержать секреты)
+.env
+.env.local
+.env.*.local
+
+# Артефакты экспериментов и профилирования
+/test/bench/results/
+*.prof
+*.pprof
+
+.claude/
+.serena/
