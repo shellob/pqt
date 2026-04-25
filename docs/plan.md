@@ -109,15 +109,23 @@ pqt/
 - Тесты: round-trip, tampering, неверный ключ, корректный размер подписи
 - Бенчмарки: `Benchmark_*_Keygen / _Sign / _Verify` для всех вариантов
 
-### Этап 2 — Формат токена
-- `header.go`: структура `Header{Alg, Ver, Typ, Enc, Kid}`
-- `claims.go`: структура `Claims{Sub, Iss, Aud, Exp, Iat, Jti, Scope}` + extra-поля
-- `alg.go`: константы `AlgECDSAP256`, `AlgMLDSA44/65/87`, `AlgHybrid*`
-- `codec_json.go`: `EncodeJSON` / `DecodeJSON`
-- `codec_cbor.go`: CWT-маппинг (`1=sub, 2=iss, 3=aud, 4=exp, 5=iat, 6=jti, 7=scope`)
-- `format_text.go`: `base64url(H).base64url(P).base64url(Sig)`
-- `format_binary.go`: `uint16 lenH | H | uint16 lenP | P | Sig`
-- Тесты: круговая сериализация, edge-cases (пустой scope, длинный sub, юникод)
+### Этап 2 — Формат токена ✅ закрыт (пакет `token/`)
+- `token/header.go`: структура `Header{Alg, Ver, Typ, Enc, Kid}` + строгий декодер
+  (`DisallowUnknownFields`, проверка trailing data, `Ver` ограничен `[1, CurrentVersion]`)
+- `token/claims.go`: структура `Claims{Sub, Iss, Aud, Exp, Iat, Jti, Scope}` с тегами
+  `cbor:"<n>,keyasint"` для CWT-стиля
+- Алгоритмы переиспользуются из `keys.Alg` (не дублируем)
+- `token/codec_payload.go`: `EncodePayload`/`DecodePayload`. CBOR-кодер — канонический режим
+  (`CanonicalEncOptions`), декодер — строгий (`DupMapKeyEnforcedAPF`, отвергает дубликаты ключей)
+- CWT-маппинг: `1=sub, 2=iss, 3=aud, 4=exp, 5=iat, 6=jti, 7=scope`
+- `token/format_text.go`: `Base64url(H).Base64url(P).Base64url(Sig)` через `RawURLEncoding`
+- `token/format_binary.go`: `uint16-BE(lenH) || H || uint16-BE(lenP) || P || Sig`,
+  zero-copy view на исходный буфер при разборе
+- Тесты: round-trip header/claims в обоих кодеках, проверка целочисленных ключей и значений
+  в CBOR, omitempty, детерминизм CBOR, оба формата сериализации, отсутствие base64-padding,
+  детект aliasing'а исходного буфера, edge-cases с обрезанными секциями и слишком длинными частями
+- Изначальный план «плоский корень» (`header.go`/`claims.go` в корне модуля) не реализован —
+  файлы лежат в подпакете `token/` ради консистентности с `keys/` и `jwk/`
 
 ### Этап 3 — JWK и ротация ключей
 - `jwk.go`: типы `JWK`, `JWKSet`

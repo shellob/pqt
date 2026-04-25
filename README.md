@@ -26,7 +26,10 @@
 
 ```
 pqt/
-├── *.go                    # библиотека формата PQ-AT (плоский корень)
+├── doc.go                  # корневой пакет pqt (публичный API Issue/Parse/Validate появится на этапе 4)
+├── keys/                   # криптослой: интерфейсы PrivateKey/PublicKey, ECDSA, ML-DSA, Hybrid
+├── jwk/                    # сериализация ключей в JSON Web Key (kty: EC / MLDSA / Hybrid)
+├── token/                  # формат токена PQ-AT: Header, Claims, JSON/CBOR, текстовый и бинарный форматы
 ├── cmd/
 │   ├── pqt-cli/            # CLI: keygen / sign / verify / decode
 │   ├── pqt-authserver/     # сервер авторизации (OAuth 2.0-совместимый)
