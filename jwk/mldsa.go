@@ -39,10 +39,10 @@ func mldsaPublicToJWK(v *keys.MLDSAPublicKey) (JWK, error) {
 func parseMLDSAPrivateJWK(j JWK) (keys.PrivateKey, error) {
 	priv, err := base64.RawURLEncoding.DecodeString(j.Priv)
 	if err != nil {
-		return nil, fmt.Errorf("%w: mldsa priv decode: %w", keys.ErrInvalidKey, err)
+		return nil, fmt.Errorf("%w: разбор поля priv: %w", keys.ErrInvalidKey, err)
 	}
 	if len(priv) == 0 {
-		return nil, fmt.Errorf("%w: mldsa private key missing priv", keys.ErrInvalidKey)
+		return nil, fmt.Errorf("%w: у приватного ML-DSA-ключа нет поля priv", keys.ErrInvalidKey)
 	}
 	return keys.NewMLDSAPrivateFromBytes(keys.Alg(j.Alg), priv)
 }
@@ -50,10 +50,10 @@ func parseMLDSAPrivateJWK(j JWK) (keys.PrivateKey, error) {
 func parseMLDSAPublicJWK(j JWK) (keys.PublicKey, error) {
 	pub, err := base64.RawURLEncoding.DecodeString(j.Pub)
 	if err != nil {
-		return nil, fmt.Errorf("%w: mldsa pub decode: %w", keys.ErrInvalidKey, err)
+		return nil, fmt.Errorf("%w: разбор поля pub: %w", keys.ErrInvalidKey, err)
 	}
 	if len(pub) == 0 {
-		return nil, fmt.Errorf("%w: mldsa public key missing pub", keys.ErrInvalidKey)
+		return nil, fmt.Errorf("%w: у публичного ML-DSA-ключа нет поля pub", keys.ErrInvalidKey)
 	}
 	return keys.NewMLDSAPublicFromBytes(keys.Alg(j.Alg), pub)
 }

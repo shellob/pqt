@@ -8,23 +8,22 @@ import (
 	"github.com/cloudflare/circl/sign/schemes"
 )
 
-// MLDSAPrivateKey оборачивает приватный ключ ML-DSA через унифицированный
-// интерфейс sign.Scheme из cloudflare/circl. Уровень безопасности (44/65/87)
-// определяется полем alg.
+// MLDSAPrivateKey оборачивает приватный ключ ML-DSA из библиотеки
+// cloudflare/circl. Уровень безопасности (44, 65 или 87) задаётся полем alg.
 type MLDSAPrivateKey struct {
 	scheme sign.Scheme
 	sk     sign.PrivateKey
 	alg    Alg
 }
 
-// MLDSAPublicKey — соответствующий публичный ключ ML-DSA.
+// MLDSAPublicKey — парный публичный ключ ML-DSA.
 type MLDSAPublicKey struct {
 	scheme sign.Scheme
 	pk     sign.PublicKey
 	alg    Alg
 }
 
-// GenerateMLDSA генерирует пару ключей ML-DSA указанного уровня.
+// GenerateMLDSA генерирует пару ключей ML-DSA нужного уровня.
 // Допустимые значения: AlgMLDSA44, AlgMLDSA65, AlgMLDSA87.
 func GenerateMLDSA(alg Alg) (*MLDSAPrivateKey, error) {
 	scheme, err := mldsaScheme(alg)
@@ -38,14 +37,14 @@ func GenerateMLDSA(alg Alg) (*MLDSAPrivateKey, error) {
 	return &MLDSAPrivateKey{scheme: scheme, sk: sk, alg: alg}, nil
 }
 
-// Sign возвращает ML-DSA-подпись фиксированного размера для выбранного уровня.
-// Контекст и pre-hashed-режимы спецификацией PQ-AT не используются.
+// Sign возвращает ML-DSA-подпись фиксированного для уровня размера.
+// Контекст и pre-hashed-режим в спецификации PQ-AT не используются.
 func (p *MLDSAPrivateKey) Sign(message []byte) ([]byte, error) {
 	return p.scheme.Sign(p.sk, message, nil), nil
 }
 
-// Public возвращает парный публичный ключ. Извлекается из приватного через
-// sign.PrivateKey.Public(); это операция без копирования секретного материала.
+// Public возвращает парный публичный ключ. Достаётся из приватного через
+// sign.PrivateKey.Public(); секретный материал при этом не копируется.
 func (p *MLDSAPrivateKey) Public() PublicKey {
 	return &MLDSAPublicKey{
 		scheme: p.scheme,
@@ -54,16 +53,16 @@ func (p *MLDSAPrivateKey) Public() PublicKey {
 	}
 }
 
-// Algorithm возвращает уровень ML-DSA, заданный при генерации ключа.
+// Algorithm возвращает уровень ML-DSA, который был выбран при генерации ключа.
 func (p *MLDSAPrivateKey) Algorithm() Alg { return p.alg }
 
-// PrivateBytes возвращает байтовое представление приватного ключа в формате
+// PrivateBytes возвращает приватный ключ в байтовом виде, как его сериализует
 // circl. Длина зависит от уровня (FIPS 204).
 func (p *MLDSAPrivateKey) PrivateBytes() ([]byte, error) {
 	return marshalCirclBinary(p.sk)
 }
 
-// PublicBytes возвращает байтовое представление публичной части.
+// PublicBytes возвращает публичную часть в байтовом виде circl.
 func (p *MLDSAPrivateKey) PublicBytes() ([]byte, error) {
 	return marshalCirclBinary(p.sk.Public())
 }
@@ -76,16 +75,16 @@ func (v *MLDSAPublicKey) Verify(message, signature []byte) error {
 	return nil
 }
 
-// Algorithm возвращает уровень ML-DSA публичного ключа.
+// Algorithm возвращает уровень ML-DSA этого публичного ключа.
 func (v *MLDSAPublicKey) Algorithm() Alg { return v.alg }
 
-// Bytes возвращает байтовое представление публичного ключа в формате circl.
+// Bytes возвращает публичный ключ в байтовом виде circl.
 func (v *MLDSAPublicKey) Bytes() ([]byte, error) {
 	return marshalCirclBinary(v.pk)
 }
 
-// NewMLDSAPrivateFromBytes восстанавливает приватный ключ ML-DSA указанного
-// уровня из байтового представления circl.
+// NewMLDSAPrivateFromBytes собирает приватный ML-DSA-ключ нужного уровня
+// из байтов в формате circl.
 func NewMLDSAPrivateFromBytes(alg Alg, data []byte) (*MLDSAPrivateKey, error) {
 	scheme, err := mldsaScheme(alg)
 	if err != nil {
@@ -93,13 +92,13 @@ func NewMLDSAPrivateFromBytes(alg Alg, data []byte) (*MLDSAPrivateKey, error) {
 	}
 	sk, err := scheme.UnmarshalBinaryPrivateKey(data)
 	if err != nil {
-		return nil, fmt.Errorf("%w: mldsa private parse: %w", ErrInvalidKey, err)
+		return nil, fmt.Errorf("%w: разбор приватного ML-DSA-ключа: %w", ErrInvalidKey, err)
 	}
 	return &MLDSAPrivateKey{scheme: scheme, sk: sk, alg: alg}, nil
 }
 
-// NewMLDSAPublicFromBytes восстанавливает публичный ключ ML-DSA указанного
-// уровня из байтового представления circl.
+// NewMLDSAPublicFromBytes собирает публичный ML-DSA-ключ нужного уровня
+// из байтов в формате circl.
 func NewMLDSAPublicFromBytes(alg Alg, data []byte) (*MLDSAPublicKey, error) {
 	scheme, err := mldsaScheme(alg)
 	if err != nil {
@@ -107,13 +106,13 @@ func NewMLDSAPublicFromBytes(alg Alg, data []byte) (*MLDSAPublicKey, error) {
 	}
 	pk, err := scheme.UnmarshalBinaryPublicKey(data)
 	if err != nil {
-		return nil, fmt.Errorf("%w: mldsa public parse: %w", ErrInvalidKey, err)
+		return nil, fmt.Errorf("%w: разбор публичного ML-DSA-ключа: %w", ErrInvalidKey, err)
 	}
 	return &MLDSAPublicKey{scheme: scheme, pk: pk, alg: alg}, nil
 }
 
-// mldsaScheme сопоставляет наш Alg внутреннему имени circl.
-// Имена ML-DSA-44/65/87 фиксированы в реестре schemes.ByName().
+// mldsaScheme переводит наш Alg в имя схемы из circl. Имена ML-DSA-44/65/87
+// прописаны в реестре schemes.ByName().
 func mldsaScheme(alg Alg) (sign.Scheme, error) {
 	var name string
 	switch alg {
@@ -128,30 +127,32 @@ func mldsaScheme(alg Alg) (sign.Scheme, error) {
 	}
 	scheme := schemes.ByName(name)
 	if scheme == nil {
-		return nil, fmt.Errorf("%w: scheme %q not found in circl registry",
+		return nil, fmt.Errorf("%w: схема %q не найдена в реестре circl",
 			ErrUnsupportedAlg, name)
 	}
 	return scheme, nil
 }
 
-// marshalCirclBinary сериализует ключ circl, который должен реализовывать
-// encoding.BinaryMarshaler (это контракт sign.PrivateKey/PublicKey).
+// marshalCirclBinary сериализует ключ из circl в байты. Контракт circl
+// гарантирует, что sign.PrivateKey и sign.PublicKey реализуют
+// encoding.BinaryMarshaler — но на всякий случай проверяем это явно.
 func marshalCirclBinary(key any) ([]byte, error) {
 	m, ok := key.(encoding.BinaryMarshaler)
 	if !ok {
-		return nil, fmt.Errorf("%w: key %T does not implement BinaryMarshaler",
+		return nil, fmt.Errorf("%w: ключ %T не реализует BinaryMarshaler",
 			ErrInvalidKey, key)
 	}
 	b, err := m.MarshalBinary()
 	if err != nil {
-		return nil, fmt.Errorf("%w: marshal: %w", ErrInvalidKey, err)
+		return nil, fmt.Errorf("%w: сериализация ключа: %w", ErrInvalidKey, err)
 	}
 	return b, nil
 }
 
-// Используется только для проверки во время компиляции, что sign.PublicKey
-// и sign.PrivateKey действительно поддерживают BinaryMarshaler в текущей
-// версии circl.
+// Проверка во время компиляции, что в текущей версии circl интерфейсы
+// sign.PrivateKey и sign.PublicKey действительно поддерживают BinaryMarshaler.
+// Если кто-то обновит circl и эта проверка перестанет компилироваться — это
+// сразу станет видно.
 var (
 	_ encoding.BinaryMarshaler = (sign.PublicKey)(nil)
 	_ encoding.BinaryMarshaler = (sign.PrivateKey)(nil)

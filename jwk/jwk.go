@@ -7,12 +7,14 @@ import (
 	"pqt/keys"
 )
 
-// JWK — JSON Web Key для одного ключа (приватного или публичного).
+// JWK — JSON Web Key для одного ключа: приватного или публичного.
 //
-// Поля "kid", "use", "alg" соответствуют RFC 7517. EC-специфичные X, Y, D —
-// RFC 7518 §6.2. MLDSA-специфичные Pub, Priv — байтовые представления ключа
-// circl, закодированные base64url. Hybrid-специфичное Components содержит
-// массив из двух JWK: классическая часть, затем постквантовая.
+// Поля Kid, Use, Alg — общие для всех типов ключей (RFC 7517).
+// Поля Crv, X, Y, D относятся к EC-ключам (RFC 7518 §6.2).
+// Поля Pub, Priv — байтовое представление ML-DSA-ключа (формат circl,
+// закодированный в Base64url). Это наше расширение.
+// Поле Components — для гибридного ключа: массив из двух JWK,
+// сначала классическая часть, потом постквантовая. Тоже расширение.
 type JWK struct {
 	Kty string `json:"kty"`
 	Alg string `json:"alg,omitempty"`
@@ -25,28 +27,29 @@ type JWK struct {
 	Y   string `json:"y,omitempty"`
 	D   string `json:"d,omitempty"`
 
-	// MLDSA (расширение)
+	// ML-DSA (наше расширение)
 	Pub  string `json:"pub,omitempty"`
 	Priv string `json:"priv,omitempty"`
 
-	// Hybrid (расширение)
+	// Гибрид (наше расширение)
 	Components []JWK `json:"components,omitempty"`
 }
 
-// String возвращает компактное JSON-представление JWK без отступов.
+// String возвращает JWK как компактную JSON-строку без отступов.
 func (j JWK) String() string {
 	b, _ := json.Marshal(j) //nolint:errchkjson // структура заведомо сериализуема
 	return string(b)
 }
 
-// Sentinel-ошибка для нераспознанного "kty".
+// errUnsupportedKty — маркерная ошибка, когда поле kty в JWK неизвестное.
 //
-// Конкретные ошибки парсинга оборачивают keys.ErrInvalidKey,
-// поэтому errors.Is(err, keys.ErrInvalidKey) всегда работает.
+// Все остальные ошибки разбора JWK возвращаются с тегом keys.ErrInvalidKey,
+// поэтому errors.Is(err, keys.ErrInvalidKey) на стороне вызывающего работает
+// в любом случае.
 var errUnsupportedKty = fmt.Errorf("jwk: unsupported kty")
 
-// MarshalPrivate сериализует приватный ключ в JWK. Тип ключа определяется
-// его конкретным типом из пакета keys.
+// MarshalPrivate сериализует приватный ключ в JWK. Какой именно ключ — решается
+// по конкретному типу из пакета keys.
 func MarshalPrivate(key keys.PrivateKey) (JWK, error) {
 	switch k := key.(type) {
 	case *keys.ECDSAPrivateKey:
@@ -56,11 +59,12 @@ func MarshalPrivate(key keys.PrivateKey) (JWK, error) {
 	case *keys.HybridPrivateKey:
 		return hybridPrivateToJWK(k)
 	default:
-		return JWK{}, fmt.Errorf("%w: unknown private key type %T", keys.ErrInvalidKey, key)
+		return JWK{}, fmt.Errorf("%w: неизвестный тип приватного ключа %T", keys.ErrInvalidKey, key)
 	}
 }
 
-// MarshalPublic сериализует публичный ключ в JWK без приватного материала.
+// MarshalPublic сериализует публичный ключ в JWK. Приватный материал в JWK,
+// конечно, не попадает.
 func MarshalPublic(key keys.PublicKey) (JWK, error) {
 	switch k := key.(type) {
 	case *keys.ECDSAPublicKey:
@@ -70,11 +74,12 @@ func MarshalPublic(key keys.PublicKey) (JWK, error) {
 	case *keys.HybridPublicKey:
 		return hybridPublicToJWK(k)
 	default:
-		return JWK{}, fmt.Errorf("%w: unknown public key type %T", keys.ErrInvalidKey, key)
+		return JWK{}, fmt.Errorf("%w: неизвестный тип публичного ключа %T", keys.ErrInvalidKey, key)
 	}
 }
 
-// ParsePrivate восстанавливает приватный ключ из JWK по полю Kty.
+// ParsePrivate собирает приватный ключ из JWK. Какой именно — определяется
+// полем kty.
 func ParsePrivate(j JWK) (keys.PrivateKey, error) {
 	switch j.Kty {
 	case "EC":
@@ -88,7 +93,8 @@ func ParsePrivate(j JWK) (keys.PrivateKey, error) {
 	}
 }
 
-// ParsePublic восстанавливает публичный ключ из JWK по полю Kty.
+// ParsePublic собирает публичный ключ из JWK. Какой именно — определяется
+// полем kty.
 func ParsePublic(j JWK) (keys.PublicKey, error) {
 	switch j.Kty {
 	case "EC":
