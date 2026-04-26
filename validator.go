@@ -132,6 +132,10 @@ func validateClaims(c token.Claims, opts ValidateOptions) error {
 			ErrAudienceMismatch, opts.ExpectedAudience, c.Aud)
 	}
 
+	if opts.IsRevoked != nil && c.Jti != "" && opts.IsRevoked(c.Jti) {
+		return fmt.Errorf("%w: jti=%s", ErrTokenRevoked, c.Jti)
+	}
+
 	return nil
 }
 

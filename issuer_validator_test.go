@@ -557,6 +557,66 @@ func TestValidate_RejectsInvalidOptions(t *testing.T) {
 	}
 }
 
+func TestValidate_RevokedToken(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+	signer, err := keys.GenerateECDSA()
+	if err != nil {
+		t.Fatalf("GenerateECDSA: %v", err)
+	}
+
+	tokenBytes, err := pqt.Issue(sampleClaims(now), pqt.IssueOptions{
+		Signer: signer,
+		Codec:  token.CodecJSON,
+		Format: token.FormatText,
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	// Чёрный список: считаем, что наш jti отозван.
+	blacklist := map[string]bool{sampleClaims(now).Jti: true}
+
+	_, err = pqt.Validate(tokenBytes, pqt.ValidateOptions{
+		KeySource: staticKey(signer.Public()),
+		Format:    token.FormatText,
+		Clock:     fixedClock(now),
+		IsRevoked: func(jti string) bool { return blacklist[jti] },
+	})
+	if !errors.Is(err, pqt.ErrTokenRevoked) {
+		t.Fatalf("ожидали ErrTokenRevoked, получили %v", err)
+	}
+}
+
+func TestValidate_NilIsRevokedSkipsCheck(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+	signer, err := keys.GenerateECDSA()
+	if err != nil {
+		t.Fatalf("GenerateECDSA: %v", err)
+	}
+
+	tokenBytes, err := pqt.Issue(sampleClaims(now), pqt.IssueOptions{
+		Signer: signer,
+		Codec:  token.CodecJSON,
+		Format: token.FormatText,
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	if _, err := pqt.Validate(tokenBytes, pqt.ValidateOptions{
+		KeySource: staticKey(signer.Public()),
+		Format:    token.FormatText,
+		Clock:     fixedClock(now),
+		// IsRevoked = nil — проверка должна полностью пропускаться.
+	}); err != nil {
+		t.Fatalf("Validate без IsRevoked: %v", err)
+	}
+}
+
 func TestParse_ReadsHeaderWithoutVerification(t *testing.T) {
 	t.Parallel()
 

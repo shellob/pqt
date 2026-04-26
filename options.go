@@ -85,4 +85,11 @@ type ValidateOptions struct {
 	// рассинхронизации серверных часов. Значение по умолчанию 0 — никакой
 	// поблажки нет.
 	Leeway time.Duration
+
+	// IsRevoked — опциональная функция проверки, не отозван ли токен по jti.
+	// Если nil — проверка пропускается. Если задана и возвращает true для
+	// jti токена, Validate возвращает ErrTokenRevoked. Реализацию определяет
+	// caller: чёрный список в памяти, запрос к серверу авторизации,
+	// distributed cache и т. п.
+	IsRevoked func(jti string) bool
 }

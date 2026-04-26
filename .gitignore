@@ -36,6 +36,12 @@ go.work.sum
 *.prof
 *.pprof
 
+# Локальные ключи и токены, которые сервер/CLI создают при ручных прогонах
+/keys/
+/demo-keys/
+*.priv.jwk.json
+*.pub.jwk.json
+
 .claude/
 .serena/
 .docs/

@@ -32,4 +32,9 @@ var (
 	// ErrInvalidOptions — переданные опции выпуска или проверки несовместимы
 	// (например, в IssueOptions нет Signer'а, или Format/Codec не указаны).
 	ErrInvalidOptions = errors.New("pqt: invalid options")
+
+	// ErrTokenRevoked — токен был отозван (его jti в чёрном списке).
+	// Возвращается, если caller передал ValidateOptions.IsRevoked и она
+	// вернула true для текущего jti.
+	ErrTokenRevoked = errors.New("pqt: token revoked")
 )
