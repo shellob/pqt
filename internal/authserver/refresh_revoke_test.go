@@ -225,6 +225,36 @@ func TestRevoke_RefreshTokenRemovesSession(t *testing.T) {
 	}
 }
 
+func TestRevoke_HintRefreshButAccessKindStillBlacklists(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t)
+
+	// Атакующий присылает access-токен и в hint указывает refresh_token,
+	// надеясь, что сервер послушает hint и не положит токен в blacklist.
+	// Сервер обязан верить только claim.Kind, и положить access в blacklist.
+	pair := loginAndDecodeTokens(t, srv, "alice", "alice-password-2026")
+
+	rec := postForm(t, srv, "/auth/revoke", url.Values{
+		"token":           {pair.AccessToken},
+		"token_type_hint": {"refresh_token"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("revoke status %d", rec.Code)
+	}
+
+	// После revoke access-токен должен быть отвергнут как revoked.
+	_, err := pqt.Validate([]byte(pair.AccessToken), pqt.ValidateOptions{
+		KeySource:        publicKeyFromJWKS(t, srv),
+		Format:           token.FormatText,
+		ExpectedIssuer:   srv.Issuer(),
+		ExpectedAudience: srv.Issuer(),
+		IsRevoked:        srv.IsRevoked,
+	})
+	if !errors.Is(err, pqt.ErrTokenRevoked) {
+		t.Fatalf("ожидали ErrTokenRevoked (hint не должен пересиливать claim.Kind), получили %v", err)
+	}
+}
+
 func TestRevoke_GarbageTokenStillReturns200(t *testing.T) {
 	t.Parallel()
 	srv := newTestServer(t)

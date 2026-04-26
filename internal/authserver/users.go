@@ -37,13 +37,20 @@ type User struct {
 // UserStore — хранилище seed-пользователей. Не потокобезопасно для записи,
 // но писать в него и не предполагается: набор пользователей фиксированный.
 type UserStore struct {
-	users map[string]User
+	users     map[string]User
+	dummyHash []byte
 }
 
 // NewUserStore создаёт хранилище и хеширует пароли всех seed-пользователей.
 // bcryptCost задаёт сложность хеширования: production-значение по умолчанию —
 // bcrypt.DefaultCost (10), для тестов имеет смысл bcrypt.MinCost (4),
 // чтобы старт занимал миллисекунды.
+//
+// Вместе с пользователями хешируется заглушка: её используют, когда в
+// Authenticate приходит несуществующий логин, чтобы время отклика не
+// зависело от факта существования учётки. Хеш заглушки делается с тем же
+// cost, что и реальные — иначе атакующий по времени тривиально различит
+// «логин есть» vs «логина нет».
 func NewUserStore(bcryptCost int) (*UserStore, error) {
 	users := make(map[string]User, len(seedUsers))
 	for name, spec := range seedUsers {
@@ -57,7 +64,13 @@ func NewUserStore(bcryptCost int) (*UserStore, error) {
 			Scope:        spec.Scope,
 		}
 	}
-	return &UserStore{users: users}, nil
+
+	dummy, err := bcrypt.GenerateFromPassword([]byte("dummy"), bcryptCost)
+	if err != nil {
+		return nil, fmt.Errorf("authserver: bcrypt-хеш заглушки: %w", err)
+	}
+
+	return &UserStore{users: users, dummyHash: dummy}, nil
 }
 
 // Authenticate проверяет логин и пароль. Возвращает пользователя при успехе
@@ -66,10 +79,9 @@ func NewUserStore(bcryptCost int) (*UserStore, error) {
 func (s *UserStore) Authenticate(username, password string) (User, bool) {
 	u, ok := s.users[username]
 	if !ok {
-		// Прогоняем bcrypt-сравнение даже при отсутствии пользователя, чтобы
-		// время отклика не зависело от существования логина. Используем
-		// фиксированный заглушечный хеш, чтобы CompareHashAndPassword отработал.
-		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
+		// Прогоняем bcrypt-сравнение по той же стоимости, что и реальный
+		// хеш — иначе время отклика выдаст факт существования логина.
+		_ = bcrypt.CompareHashAndPassword(s.dummyHash, []byte(password))
 		return User{}, false
 	}
 	if err := bcrypt.CompareHashAndPassword(u.PasswordHash, []byte(password)); err != nil {
@@ -77,8 +89,3 @@ func (s *UserStore) Authenticate(username, password string) (User, bool) {
 	}
 	return u, true
 }
-
-// dummyHash — заглушечный bcrypt-хеш константного значения. Используется в
-// Authenticate для нечувствительности времени отклика к существованию логина.
-// Сам хеш сгенерирован один раз и зашит в код; пароль "dummy" с cost=4.
-var dummyHash = []byte("$2a$04$j7s5oCNYvYG8gwx3RPLKPOkWvK8VoPJoCEd0Bs4WlcWyCM38P5jZK")

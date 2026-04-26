@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -59,6 +60,12 @@ type Config struct {
 	// сервера занимал миллисекунды, а не секунду.
 	BcryptCost int
 
+	// Debug включает диагностические эндпоинты /debug/pprof/* — профилирование
+	// CPU, кучи и горутин. По умолчанию выключено: эти эндпоинты раскрывают
+	// внутреннее состояние сервера и в production должны быть закрыты.
+	// Включается через флаг командной строки --debug или env PQT_DEBUG=1.
+	Debug bool
+
 	// Logger — куда писать диагностические сообщения. Если nil, используется
 	// slog.Default().
 	Logger *slog.Logger
@@ -91,6 +98,7 @@ func LoadFromEnv() Config {
 		RefreshTTL:  envDuration("PQT_REFRESH_TTL", 30*24*time.Hour),
 		GenerateAlg: keys.Alg(envOr("PQT_GENERATE_ALG", string(keys.AlgHybridECDSAMLDSA65))),
 		BcryptCost:  envInt("PQT_BCRYPT_COST", bcrypt.DefaultCost),
+		Debug:       envBool("PQT_DEBUG", false),
 	}
 }
 
@@ -163,4 +171,17 @@ func envInt(name string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// envBool читает env как булев флаг. Принимает 1/true/yes/on в любом регистре
+// как true; всё остальное (включая отсутствие переменной) — fallback.
+func envBool(name string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "":
+		return fallback
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

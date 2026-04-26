@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log/slog"
 	"net/http"
 	"os"
@@ -29,8 +30,15 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
 
+	debug := flag.Bool("debug", false,
+		"включить /debug/pprof/* (профилирование). Эквивалент PQT_DEBUG=1.")
+	flag.Parse()
+
 	cfg := authserver.LoadFromEnv()
 	cfg.Logger = logger
+	if *debug {
+		cfg.Debug = true
+	}
 
 	srv, err := authserver.New(cfg)
 	if err != nil {
@@ -48,7 +56,7 @@ func main() {
 	// чтобы main мог корректно дождаться либо ошибки, либо сигнала.
 	listenErr := make(chan error, 1)
 	go func() {
-		logger.Info("сервер слушает", "addr", cfg.Addr, "issuer", cfg.Issuer)
+		logger.Info("запускаю listener", "addr", cfg.Addr, "issuer", cfg.Issuer)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			listenErr <- err
 		}

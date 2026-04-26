@@ -172,21 +172,25 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 }
 
 // applyRevocation удаляет refresh-сессию или добавляет access-jti в чёрный
-// список, в зависимости от того, что нам пришло на вход. Hint используется
-// как подсказка, но окончательное решение принимаем по claim kind, потому
-// что подсказка пришла снаружи и доверять ей слепо нельзя.
+// список. Решение принимается строго по claim.Kind токена — это поле подписано
+// и менять его извне нельзя. Hint из тела запроса используется только в
+// единственном случае: токен выпустили до появления Kind (Kind==""), и нам
+// нужна подсказка. Иначе hint игнорируется — иначе атакующий мог бы выдать
+// чужой access-токен за refresh и обнулить blacklist'инг.
 func (s *Server) applyRevocation(_ token.Header, c token.Claims, hint string) {
 	if c.Jti == "" {
 		return
 	}
-	switch {
-	case c.Kind == token.KindRefresh || hint == "refresh_token":
-		s.refresh.Delete(c.Jti)
-	default:
-		// Включая Kind == "access" и пустой Kind (старые токены, выпущенные
-		// до этапа 7б). Кладём в чёрный список access-токенов.
-		s.revoked.Revoke(c.Jti, s.cfg.Now())
+	kind := c.Kind
+	if kind == "" {
+		kind = hint
 	}
+	if kind == token.KindRefresh || kind == "refresh_token" {
+		s.refresh.Delete(c.Jti)
+		return
+	}
+	// access, пустой Kind без полезного hint — всё в blacklist.
+	s.revoked.Revoke(c.Jti, s.cfg.Now())
 }
 
 // issuePair выпускает пару (access, refresh) для пользователя с заданным scope.
@@ -200,14 +204,14 @@ func (s *Server) issuePair(username, scope string) (tokenResponse, error) {
 		return tokenResponse{}, err
 	}
 
-	refreshClaims, err := s.issueOne(keyEntry, username, scope, token.KindRefresh, s.cfg.RefreshTTL, now)
+	refresh, err := s.issueOne(keyEntry, username, scope, token.KindRefresh, s.cfg.RefreshTTL, now)
 	if err != nil {
 		return tokenResponse{}, err
 	}
 
 	// Сессия refresh — для лукапа в /auth/refresh.
-	s.refresh.Save(&RefreshSession{
-		JTI:       refreshClaims.jti,
+	s.refresh.Save(RefreshSession{
+		JTI:       refresh.jti,
 		Username:  username,
 		Scope:     scope,
 		IssuedAt:  now,
@@ -215,10 +219,10 @@ func (s *Server) issuePair(username, scope string) (tokenResponse, error) {
 	})
 
 	return tokenResponse{
-		AccessToken:      string(access.serialized),
+		AccessToken:      string(access.bytes),
 		TokenType:        "Bearer",
 		ExpiresIn:        int(s.cfg.AccessTTL.Seconds()),
-		RefreshToken:     string(refreshClaims.serialized),
+		RefreshToken:     string(refresh.bytes),
 		RefreshExpiresIn: int(s.cfg.RefreshTTL.Seconds()),
 		Scope:            scope,
 	}, nil
@@ -227,8 +231,8 @@ func (s *Server) issuePair(username, scope string) (tokenResponse, error) {
 // issuedToken — внутренний результат issueOne: и сериализованные байты,
 // и jti, чтобы не разбирать токен повторно.
 type issuedToken struct {
-	serialized []byte
-	jti        string
+	bytes []byte
+	jti   string
 }
 
 func (s *Server) issueOne(
@@ -251,7 +255,7 @@ func (s *Server) issueOne(
 		Scope: scope,
 		Kind:  kind,
 	}
-	bytes, err := pqt.Issue(claims, pqt.IssueOptions{
+	tokenBytes, err := pqt.Issue(claims, pqt.IssueOptions{
 		Signer: key.Private,
 		Codec:  token.CodecJSON,
 		Format: token.FormatText,
@@ -260,7 +264,7 @@ func (s *Server) issueOne(
 	if err != nil {
 		return issuedToken{}, err
 	}
-	return issuedToken{serialized: bytes, jti: jti}, nil
+	return issuedToken{bytes: tokenBytes, jti: jti}, nil
 }
 
 // validateOwnRefresh проверяет, что присланный refresh-токен подписан текущим

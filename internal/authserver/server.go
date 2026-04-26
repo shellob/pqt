@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/http/pprof"
 	"slices"
 	"strings"
 )
@@ -76,7 +77,24 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /auth/refresh", s.handleRefresh)
 	mux.HandleFunc("POST /auth/revoke", s.handleRevoke)
 	mux.HandleFunc("GET /.well-known/pq-jwks", s.handleJWKS)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleDiscovery)
+
+	if s.cfg.Debug {
+		registerPprof(mux)
+		s.cfg.Logger.Warn("authserver: /debug/pprof включён — не оставлять в production")
+	}
 	return mux
+}
+
+// registerPprof регистрирует стандартные обработчики pprof из net/http/pprof
+// на наш mux. Регистрируем явно (а не через side-effect import "_"), чтобы
+// эндпоинты появлялись только при Debug=true и не висели на DefaultServeMux.
+func registerPprof(mux *http.ServeMux) {
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 }
 
 // IsRevoked возвращает true, если jti в чёрном списке. Метод нужен внешним

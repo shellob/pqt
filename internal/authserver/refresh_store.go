@@ -38,13 +38,15 @@ func NewRefreshStore() *RefreshStore {
 	return &RefreshStore{sessions: make(map[string]*RefreshSession)}
 }
 
-// Save кладёт новую сессию в хранилище. Перезапись по тому же jti не
-// предполагается (jti уникален по построению), но если случится — поведение
-// «последний победил».
-func (s *RefreshStore) Save(sess *RefreshSession) {
+// Save кладёт новую сессию в хранилище. Принимает значение, копию которого
+// и хранит — это защищает store от случайных мутаций со стороны вызывающего
+// кода. Перезапись по тому же jti не предполагается (jti уникален по
+// построению), но если случится — поведение «последний победил».
+func (s *RefreshStore) Save(sess RefreshSession) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sessions[sess.JTI] = sess
+	cp := sess
+	s.sessions[sess.JTI] = &cp
 }
 
 // Get возвращает сессию по jti.
