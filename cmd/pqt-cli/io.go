@@ -25,8 +25,15 @@ func readJWK(path string) (jwk.JWK, error) {
 	return j, nil
 }
 
-// writeJWK пишет JWK в JSON-файл с отступами — так удобнее читать
-// глазами и сравнивать diff'ом.
+// writeJWK пишет JWK в JSON-файл с отступами по 2 пробела. Без отступов
+// JSON получается одной длинной строкой, в которой ничего не разглядеть
+// глазами и неудобно смотреть diff в git. Размер файла от форматирования
+// почти не страдает (на типовом ключе разница в десятки байт).
+//
+// Права 0o600 — только чтение и запись для владельца. Через JWK мы пишем
+// и приватные ключи, и публичные (внешний код знает, какой именно вызов
+// нужен). Для приватных это критично; публичные тоже не делаем
+// общедоступными по умолчанию — для шерить ключ владелец сам сделает chmod.
 func writeJWK(path string, j jwk.JWK) error {
 	data, err := json.MarshalIndent(j, "", "  ")
 	if err != nil {
@@ -53,8 +60,11 @@ func readClaims(path string) (token.Claims, error) {
 	return c, nil
 }
 
-// readTokenBytes читает токен из файла. Для текстового формата дополнительно
-// убирает завершающий перевод строки, который многие редакторы добавляют сами.
+// readTokenBytes читает токен из файла. Для текстового формата отдельно
+// срезает завершающие переводы строк (\n и \r): многие редакторы автоматически
+// добавляют пустую строку в конец файла, и без срезания токен бы не разобрался
+// (Base64url не допускает посторонних символов в конце). Для бинарного
+// формата таких подчисток не делаем — там байт является байтом.
 func readTokenBytes(path string, format token.Format) ([]byte, error) {
 	path = filepath.Clean(path)
 	data, err := os.ReadFile(path)
@@ -62,7 +72,6 @@ func readTokenBytes(path string, format token.Format) ([]byte, error) {
 		return nil, fmt.Errorf("читаем токен %q: %w", path, err)
 	}
 	if format == token.FormatText {
-		// trim trailing CR/LF
 		for len(data) > 0 && (data[len(data)-1] == '\n' || data[len(data)-1] == '\r') {
 			data = data[:len(data)-1]
 		}
@@ -70,9 +79,12 @@ func readTokenBytes(path string, format token.Format) ([]byte, error) {
 	return data, nil
 }
 
-// writeBytes пишет байты в файл по пути path; если path пустой — в w.
-// Для текстового формата дописывает перевод строки в stdout, чтобы вывод
-// нормально смотрелся в терминале.
+// writeBytes пишет байты в файл по пути path; если path пустой — в writer w
+// (на практике — os.Stdout). Для текстового формата при выводе в writer
+// дописывает перевод строки: иначе следующий промпт оболочки слипнется с
+// последним символом токена. В файл переводы строк не добавляем — они бы
+// сломали чтение через readTokenBytes у других утилит, которые не делают
+// trim.
 func writeBytes(path string, data []byte, format token.Format, w io.Writer) error {
 	if path == "" {
 		if _, err := w.Write(data); err != nil {
@@ -85,9 +97,12 @@ func writeBytes(path string, data []byte, format token.Format, w io.Writer) erro
 		}
 		return nil
 	}
-	// 0o600: токен может содержать чувствительные claims (sub, scope), и
-	// в локальной разработке безопаснее по умолчанию ограничить права чтения
-	// владельцем. Если нужен общий доступ — пользователь сам сделает chmod.
+	// Права 0o600 — только владелец может читать и писать. В токене
+	// в payload лежит чувствительная информация (sub — кто это, scope —
+	// что ему можно). Если файл будет доступен на чтение всем, любой
+	// локальный пользователь сможет утащить токен и до его exp ходить
+	// с ним к серверу как владелец. Когда общий доступ нужен явно,
+	// пользователь сам сделает chmod.
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("запись %q: %w", path, err)
 	}

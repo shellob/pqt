@@ -81,9 +81,10 @@ func runVerify(args []string) error {
 	return nil
 }
 
-// staticVerifier — простейший KeySource: всегда возвращает один и тот же
-// публичный ключ, без поиска по kid. CLI верифицирует одним конкретным
-// ключом, так что выбор не нужен.
+// staticVerifier — упрощённый источник ключа: на любой заголовок токена
+// возвращает один и тот же заранее загруженный публичный ключ, не глядя
+// на поле kid. В CLI это разумно: пользователь явно передал единственный
+// ключ через флаг --key, и нет смысла ходить за ним по списку.
 func staticVerifier(pub keys.PublicKey) pqt.KeySource {
 	return func(token.Header) (keys.PublicKey, error) {
 		return pub, nil
@@ -91,9 +92,14 @@ func staticVerifier(pub keys.PublicKey) pqt.KeySource {
 }
 
 func printVerifyResult(c token.Claims) {
-	// Ошибки печати в stdout игнорируем сознательно: если pipe закрылся
-	// (например, пользователь нажал q в pager'е), писать всё равно некуда,
-	// а возвращать ошибку из «успешного» verify было бы неожиданно для CLI.
+	// Ошибки записи в stdout игнорируем намеренно. CLI часто запускают
+	// в составе пайпа: `pqt-cli verify ... | head -1`. Если приёмник
+	// (head, less, grep) закроет свой конец трубы, последующие
+	// fmt.Fprintln вернут «broken pipe» — но писать-то уже всё равно
+	// некуда, и сама проверка успешно прошла. Возвращать из verify
+	// ошибку из-за этого было бы неожиданно: пользователь видит «OK»
+	// и думает, что что-то пошло не так. Для других CLI Unix ведёт
+	// себя так же.
 	_, _ = fmt.Fprintln(os.Stdout, "OK")
 	_, _ = fmt.Fprintf(os.Stdout, "  sub:   %s\n", c.Sub)
 	_, _ = fmt.Fprintf(os.Stdout, "  iss:   %s\n", c.Iss)
