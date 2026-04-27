@@ -1,18 +1,32 @@
-// Package openapi программно собирает OpenAPI 3.1-документ для всего набора
-// эндпоинтов проекта pqt: эндпоинты pqt-authserver и pqt-resource.
+// Package openapi программно собирает OpenAPI-документ для всех HTTP-эндпоинтов
+// проекта pqt — auth-сервера (pqt-authserver) и сервера ресурсов (pqt-resource).
 //
-// Подход «code-first»: путь, метод и схему ответа задаём один раз в Go-коде,
-// а YAML генерируется командой cmd/pqt-openapi-gen. Это гарантирует, что
-// документ всегда согласован с реальной реализацией: достаточно тестом
-// проверить, что Build() даёт валидный документ — рассинхрон с кодом
-// поймается на CI.
+// OpenAPI — это стандарт описания HTTP API в машинно-читаемом виде (JSON или
+// YAML). По такому документу инструменты автоматически генерируют клиентов,
+// валидируют запросы, рисуют интерактивные просмотрщики (Swagger UI) и
+// проверяют ответы тестами.
+//
+// Здесь выбран подход «code-first»: путь, метод, тело запроса и схему ответа
+// мы один раз описываем в этом Go-файле через типы из библиотеки kin-openapi.
+// Сам YAML потом генерируется командой `go run ./cmd/pqt-openapi-gen` и
+// кладётся в api/openapi.yaml и в webui/. Тест TestSpec_IsValid через
+// spec.Validate(ctx) дополнительно гарантирует, что документ синтаксически
+// валидный — если кто-то что-то опечатает в схемах, рассинхрон ловится на CI.
+//
+// Альтернатива «schema-first» (написать YAML руками, генерировать код по
+// нему) для нашего размера API получалась тяжелее: мало эндпоинтов, простые
+// схемы, удобнее держать описание рядом с реализацией.
 package openapi
 
 import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// Версии и адреса для документа. Менять — только осознанно.
+// Версии и адреса по умолчанию, которые запекаются в документ. Менять
+// эти значения нужно осознанно: по specVersion инструменты определяют,
+// какую версию OpenAPI они должны разбирать; по docVersion — версию
+// именно нашего API; URL-ы становятся выпадающим списком серверов в
+// Swagger UI, и Try-it-out отправляет запросы по выбранному из них.
 const (
 	specVersion = "3.1.0"
 	docVersion  = "1.0.0"
@@ -23,8 +37,10 @@ const (
 	bearerScheme = "BearerAuth"
 )
 
-// Build собирает OpenAPI 3.1-документ. Возвращаемый объект готов к
-// сериализации в JSON/YAML или передаче в openapi3.T.Validate.
+// Build собирает OpenAPI-документ из частей: схемы переиспользуемых типов,
+// списки серверов и тегов, описания путей. Возвращаемый объект полностью
+// готов и для сериализации в JSON/YAML (через стандартные пакеты), и для
+// проверки целостности через openapi3.T.Validate(ctx).
 func Build() *openapi3.T {
 	schemas := buildSchemas()
 	doc := &openapi3.T{
@@ -61,9 +77,13 @@ func Build() *openapi3.T {
 	return doc
 }
 
-// schemaRef собирает SchemaRef, в котором заполнены и Ref (для сериализации),
-// и Value (чтобы validator при программной сборке смог разрешить ссылку
-// без отдельного Loader'а).
+// schemaRef строит ссылку на одну из переиспользуемых схем — заполняет
+// одновременно поле Ref (текстовая ссылка вида #/components/schemas/Имя,
+// которая попадёт в финальный YAML) и поле Value (тот же объект схемы
+// прямо в памяти). Value нужен, чтобы при валидации документа в коде
+// разбиратель ссылок не пытался лезть на диск или в сеть, а сразу нашёл
+// нужное в той же структуре. Без Value пришлось бы заводить отдельный
+// Loader, что для одного процесса сборки оверкилл.
 func schemaRef(schemas openapi3.Schemas, name string) *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{
 		Ref:   "#/components/schemas/" + name,
@@ -71,9 +91,12 @@ func schemaRef(schemas openapi3.Schemas, name string) *openapi3.SchemaRef {
 	}
 }
 
-// buildSecuritySchemes описывает один способ авторизации — Bearer-токен PQ-AT
-// в заголовке Authorization. Используется только на эндпоинтах
-// resource-сервера; auth-эндпоинты публичные.
+// buildSecuritySchemes описывает способ авторизации — у нас он один:
+// Bearer-токен PQ-AT в заголовке Authorization. В Swagger UI этот блок
+// проявится как кнопка «Authorize», в которую вставляется токен; после
+// этого Try-it-out начнёт автоматически добавлять заголовок к запросам.
+// Применяется только к эндпоинтам resource-сервера (/me, /admin) —
+// эндпоинты auth-сервера публичные, на них токен не нужен.
 func buildSecuritySchemes() openapi3.SecuritySchemes {
 	return openapi3.SecuritySchemes{
 		bearerScheme: &openapi3.SecuritySchemeRef{
@@ -87,7 +110,11 @@ func buildSecuritySchemes() openapi3.SecuritySchemes {
 	}
 }
 
-// buildSchemas — переиспользуемые схемы ответов и тел запросов.
+// buildSchemas описывает все типы данных, которые встречаются больше одного
+// раза в API: ответы /auth/token, формат ошибки, JWK, JWK Set, метаданные
+// сервера, claims токена. Один раз описанная схема в YAML переиспользуется
+// через ссылки `$ref: "#/components/schemas/Имя"`, а не дублируется
+// каждый раз — иначе документ распух бы кратно.
 func buildSchemas() openapi3.Schemas {
 	return openapi3.Schemas{
 		"TokenResponse": &openapi3.SchemaRef{
@@ -296,10 +323,22 @@ func addResourcePaths(doc *openapi3.T, schemas openapi3.Schemas) {
 	})
 }
 
-// formBody — application/x-www-form-urlencoded body. Принимает имена
-// нескольких ключевых полей в фиксированном порядке (для самодокументируемости),
-// плюс полный список required и описания всех полей. additional — поля,
-// которые попали в required-список как «иногда» — например, scope в /auth/token.
+// formBody конструирует описание тела запроса в формате
+// application/x-www-form-urlencoded — это та же кодировка, в которой
+// HTML-формы по умолчанию шлют POST-запрос (key=value, разделённое & и
+// процентным экранированием).
+//
+// Параметры:
+//   - p1, p2, p3 — имена основных полей в нужном для документа порядке;
+//     пустые строки пропускаются. Фиксированный порядок здесь только
+//     для красоты вывода в YAML.
+//   - required — какие поля обязательны (для эндпоинтов вроде /auth/token
+//     это «grant_type, username, password»).
+//   - descriptions — карта «имя поля → текст пояснения», что увидит
+//     пользователь Swagger UI при наведении на поле формы.
+//   - optional — необязательные поля, например scope в /auth/token: они
+//     должны быть в схеме (иначе валидация запроса будет ругаться на
+//     неизвестное поле), но в required их нет.
 func formBody(p1, p2, p3 string, required []string, descriptions map[string]string, optional []string) *openapi3.RequestBodyRef {
 	schema := openapi3.NewObjectSchema()
 	for _, name := range collectFields(p1, p2, p3, optional) {
@@ -319,9 +358,10 @@ func formBody(p1, p2, p3 string, required []string, descriptions map[string]stri
 	}
 }
 
-// collectFields собирает уникальный список имён полей из позиционных и
-// дополнительных, отбрасывая пустые строки. Порядок: сначала позиционные,
-// потом optional — это стабилизирует вывод в YAML.
+// collectFields склеивает позиционные имена p1/p2/p3 с дополнительным
+// списком optional, отбрасывая пустые строки. Порядок результата важен —
+// именно в нём поля попадут в YAML, и стабильный порядок позволяет diff
+// сгенерированного файла оставаться маленьким при правках кода.
 func collectFields(p1, p2, p3 string, optional []string) []string {
 	out := make([]string, 0, 4)
 	for _, n := range []string{p1, p2, p3} {
@@ -333,7 +373,9 @@ func collectFields(p1, p2, p3 string, optional []string) []string {
 	return out
 }
 
-// okJSON — Response 200 с JSON-телом по переданному SchemaRef.
+// okJSON — короткая запись для «успешный 200 с JSON-телом по схеме ref».
+// Используется вместо ручного составления openapi3.ResponseRef в каждом
+// эндпоинте — иначе вызовы внизу выглядели бы шумно.
 func okJSON(description string, ref *openapi3.SchemaRef) openapi3.NewResponsesOption {
 	resp := openapi3.NewResponse().
 		WithDescription(description).
@@ -341,13 +383,17 @@ func okJSON(description string, ref *openapi3.SchemaRef) openapi3.NewResponsesOp
 	return openapi3.WithStatus(200, &openapi3.ResponseRef{Value: resp})
 }
 
-// okEmpty — Response без тела (или с произвольным телом, на которое нам всё равно).
+// okEmpty — короткая запись для ответа без тела (или для ответа, где
+// тело клиенту не интересно). Например, /auth/revoke: успех — просто 200,
+// никаких полезных данных.
 func okEmpty(status int, description string) openapi3.NewResponsesOption {
 	resp := openapi3.NewResponse().WithDescription(description)
 	return openapi3.WithStatus(status, &openapi3.ResponseRef{Value: resp})
 }
 
-// errJSON — Response с OAuthError-телом для статусов 4xx.
+// errJSON — короткая запись для ошибочного ответа (4xx) с телом OAuthError.
+// Поля error и error_description едины для auth- и resource-сервера —
+// клиенту достаточно одного разборщика.
 func errJSON(status int, description string, errRef *openapi3.SchemaRef) openapi3.NewResponsesOption {
 	resp := openapi3.NewResponse().
 		WithDescription(description).

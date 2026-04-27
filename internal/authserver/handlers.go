@@ -18,8 +18,9 @@ import (
 const maxTokenRequestBody = 64 * 1024
 
 // tokenResponse — успешный ответ эндпоинтов /auth/token и /auth/refresh
-// (RFC 6749 §5.1). Поля refresh-токена опускаются через omitempty, если
-// refresh не выпускался.
+// (RFC 6749 §5.1). Тег `omitempty` в JSON означает «не выводить поле, если
+// оно пустое»: если refresh-токен не выпускался, в ответе просто не будет
+// полей refresh_token и refresh_expires_in.
 type tokenResponse struct {
 	AccessToken      string `json:"access_token"`
 	TokenType        string `json:"token_type"`
@@ -29,13 +30,18 @@ type tokenResponse struct {
 	Scope            string `json:"scope,omitempty"`
 }
 
-// handleToken — POST /auth/token.
+// handleToken — POST /auth/token, выпуск пары токенов по логину и паролю.
 //
-// Реализован только grant_type=password из RFC 6749 §4.3 (Resource Owner
-// Password Credentials). Это самый прямой способ выпустить токен:
-// «логин и пароль на вход — токен на выход», без редиректов и
-// authorization code flow. Для боевого OAuth-сервера password grant
-// считается устаревшим, но эксперимент главы 4 диссертации это не искажает.
+// Поддерживается только один режим — grant_type=password (RFC 6749 §4.3,
+// Resource Owner Password Credentials): клиент присылает логин и пароль
+// в теле запроса, сервер их проверяет и сразу возвращает access- и
+// refresh-токены. Никаких редиректов и промежуточных authorization code,
+// в отличие от authorization code flow.
+//
+// В реальном OAuth-сервере password grant давно считается устаревшим —
+// клиент видит чужой пароль, и нет защиты от фишинга через подменённую
+// форму логина. Для эксперимента из главы 4 диссертации это значения не
+// имеет: нас интересуют скорость и размер токенов PQ-AT, а не фронт.
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxTokenRequestBody)
 	if err := r.ParseForm(); err != nil {
@@ -120,8 +126,12 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	// Достаём сессию refresh-токена и помечаем её использованной. MarkUsed
 	// вернёт false в двух случаях: сессии нет (например, сервер
 	// перезапускали и in-memory хранилище потерялось) или её уже один раз
-	// использовали. Второе — признак того, что кто-то прислал нам
-	// «повторно сыгранный» refresh, классическая replay-атака.
+	// использовали. Второе — признак того, что кто-то повторно прислал
+	// один и тот же refresh-токен. На практике это либо легальный
+	// клиент повторил запрос после сетевого сбоя, не заметив, что
+	// первый прошёл, либо токен был украден и злоумышленник пытается
+	// им воспользоваться. Различить эти два случая сервер не может, и
+	// безопасный ответ один — отказать.
 	if !s.refresh.MarkUsed(claims.Jti) {
 		s.cfg.Logger.Warn("authserver: повторное использование refresh-токена",
 			"jti", claims.Jti, "sub", claims.Sub)
@@ -176,15 +186,17 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// applyRevocation удаляет refresh-сессию или добавляет access-jti в чёрный
-// список. Решение принимается строго по claim.Kind токена — это поле
-// подписано, и менять его извне нельзя. Подсказка из тела запроса
-// (token_type_hint) используется только в одном случае: токен выпустили
-// ещё до появления Kind (Kind пустое), и нам нужна подсказка, что это.
-// В остальных случаях hint игнорируется — иначе атакующий мог бы подсунуть
-// чужой access-токен с hint=refresh_token, и мы вместо чёрного списка
-// access-токенов попытались бы удалить refresh-сессию (которой нет под
-// таким jti) и оставили бы access живым.
+// applyRevocation проводит сам отзыв: либо удаляет refresh-сессию из
+// хранилища, либо добавляет jti access-токена в чёрный список. Решение
+// принимается по полю Kind в claims: оно подписано вместе с остальным
+// токеном, и подменить его снаружи нельзя.
+//
+// Подсказка token_type_hint из тела запроса используется только в одном
+// узком сценарии: токен выпущен старой версией сервера, в которой поля
+// Kind ещё не было. Если Kind есть — hint игнорируется, и вот почему:
+// иначе злоумышленник мог бы подсунуть свой access-токен и hint=refresh_token,
+// сервер пошёл бы удалять refresh-сессию (которой под таким jti нет),
+// а сам access так бы и остался валидным до своего естественного истечения.
 func (s *Server) applyRevocation(_ token.Header, c token.Claims, hint string) {
 	if c.Jti == "" {
 		return
@@ -257,9 +269,14 @@ func (s *Server) issueOne(
 		return issuedToken{}, err
 	}
 	claims := token.Claims{
-		Sub:   username,
-		Iss:   s.cfg.Issuer,
-		Aud:   s.cfg.Issuer, // для прототипа aud равен iss; в проде здесь стоял бы id клиентского сервиса
+		Sub: username,
+		Iss: s.cfg.Issuer,
+		// aud (audience) — кому токен предназначен. В реальной системе сюда
+		// прописывается идентификатор клиентского сервиса (например
+		// "https://api.example.com"), и валидатор отвергает токены, выписанные
+		// для других сервисов. У нас прототип, клиентский сервис один — поэтому
+		// просто берём имя издателя.
+		Aud:   s.cfg.Issuer,
 		Iat:   now.Unix(),
 		Exp:   now.Add(ttl).Unix(),
 		Jti:   jti,
@@ -305,12 +322,20 @@ func (s *Server) validateOwnRefresh(refreshToken string) (token.Claims, error) {
 	return claims, nil
 }
 
-// handleJWKS — GET /.well-known/pq-jwks.
+// handleJWKS — GET /.well-known/pq-jwks, набор публичных ключей сервера.
 //
-// Публикует все публичные ключи сервера в формате jwk.Set — внешние
-// валидаторы по этому набору проверяют подписи выпущенных нами токенов.
-// Cache-Control с коротким max-age — компромисс: даём клиентам кешировать
-// набор, но при ротации ключей не застрянем надолго со старым.
+// Любой ресурс-сервер, который проверяет наши токены, должен где-то взять
+// публичную часть ключа подписи. Стандартный путь — забрать её отсюда в
+// формате JSON Web Key Set (RFC 7517): сервер выкладывает все свои публичные
+// ключи на постоянный URL, валидатор их скачивает и кеширует у себя, а потом
+// по полю kid из заголовка токена находит нужный.
+//
+// Заголовок Cache-Control с max-age=300 (5 минут) — компромисс между двумя
+// крайностями. Без кеша валидатор бы при каждой проверке токена дёргал
+// сеть. С кешем на сутки клиент не заметит ротацию ключей и ещё долго
+// будет отвергать токены, подписанные новым ключом. 5 минут — типовой
+// компромисс: нагрузка на /pq-jwks в пределах разумного, простой при
+// смене ключа короткий.
 func (s *Server) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 	set, err := s.keys.PublicSet()
 	if err != nil {

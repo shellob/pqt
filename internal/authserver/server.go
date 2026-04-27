@@ -10,9 +10,14 @@ import (
 	"strings"
 )
 
-// Server — сервер авторизации PQ-AT. После создания через New его можно
-// использовать как обычный http.Handler — например, через httptest.NewServer
-// в тестах или http.Server в боевой среде.
+// Server — сервер авторизации PQ-AT целиком: ключи, пользователи,
+// хранилища refresh-сессий и отзывов, готовый http.Handler с маршрутами.
+//
+// Создаётся через New один раз при старте программы. После этого его
+// можно подключать к чему угодно, что принимает http.Handler — к
+// http.Server в production, к httptest.NewServer в тестах. Внутреннее
+// состояние (refresh-сессии, чёрный список) — потокобезопасное, так
+// что сервер нормально обрабатывает параллельные запросы.
 type Server struct {
 	cfg     Config
 	keys    *KeyStore
@@ -22,8 +27,19 @@ type Server struct {
 	handler http.Handler
 }
 
-// New собирает Server по конфигу: загружает или генерирует ключи,
-// инициализирует хранилище пользователей и регистрирует маршруты.
+// New собирает Server по конфигу. Поэтапно:
+//
+//  1. Проверить и нормализовать конфиг (cfg.validate).
+//  2. Загрузить или сгенерировать ключи (см. LoadOrInit).
+//  3. Создать хранилище пользователей и захэшировать seed-пароли
+//     (NewUserStore — это самая медленная часть старта при
+//     production-cost=10).
+//  4. Создать пустые in-memory хранилища refresh-сессий и отзывов.
+//  5. Зарегистрировать маршруты HTTP.
+//
+// На любой шаг возможна ошибка — например, в KeysDir лежит битый JWK
+// или диск некуда писать сгенерированный ключ. В таком случае New
+// возвращает ошибку, и сервер не стартует.
 func New(cfg Config) (*Server, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -57,20 +73,25 @@ func New(cfg Config) (*Server, error) {
 }
 
 // Handler возвращает http.Handler сервера. Поверх него можно навесить
-// дополнительный middleware и подключить к http.Server.
+// дополнительный middleware (например, для CORS, логирования или
+// rate-limit) и подключить к настоящему http.Server.
 func (s *Server) Handler() http.Handler {
 	return s.handler
 }
 
-// Issuer возвращает значение поля iss, которое сервер проставляет в выпускаемые
-// токены. Удобно для тестов и для документации.
+// Issuer возвращает значение поля iss, которое сервер проставляет в
+// claim iss выпускаемых токенов. Используется в основном тестами
+// (проверить, что токен пришёл с ожидаемым issuer) и в документации.
 func (s *Server) Issuer() string {
 	return s.cfg.Issuer
 }
 
-// routes собирает таблицу маршрутов. Используются паттерны Go 1.22 с явным
-// указанием HTTP-метода в начале — благодаря этому при несоответствии метода
-// сервер отвечает 405 Method Not Allowed, а не тихо отдаёт 404.
+// routes собирает таблицу HTTP-маршрутов. Используются паттерны
+// http.ServeMux из Go 1.22 с явным указанием метода в начале строки
+// ("POST /auth/token" вместо просто "/auth/token"). Благодаря этому
+// при несоответствии метода (например, кто-то прислал GET вместо POST)
+// сервер отвечает 405 Method Not Allowed автоматически, а не отдаёт
+// 404 — что было бы непонятно для клиента.
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /auth/token", s.handleToken)
@@ -88,10 +109,16 @@ func (s *Server) routes() http.Handler {
 	return mux
 }
 
-// registerPprof вешает стандартные обработчики pprof из net/http/pprof на
-// наш mux. Регистрируем явно, а не через скрытый импорт `_ "net/http/pprof"`:
-// иначе эндпоинты pprof автоматически прицепляются к http.DefaultServeMux
-// и поднимаются всегда, без проверки флага Debug.
+// registerPprof вешает стандартные обработчики Go pprof на наш mux.
+// pprof — встроенный профайлер: можно снять CPU-профиль, дамп кучи,
+// список горутин, посмотреть мьютекс-контеншн и т. д. Очень полезен
+// для главы 4.6 диссертации (нагрузочное тестирование), но в
+// production-сервисе доступ к нему должен быть закрыт.
+//
+// Регистрируем явно, а не через скрытый импорт `_ "net/http/pprof"`,
+// потому что скрытый импорт цепляет эндпоинты на глобальный
+// http.DefaultServeMux безусловно — независимо от наших флагов. Тут
+// мы вешаем их только при cfg.Debug, и только на наш mux.
 func registerPprof(mux *http.ServeMux) {
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
@@ -101,16 +128,18 @@ func registerPprof(mux *http.ServeMux) {
 }
 
 // IsRevoked возвращает true, если jti есть в чёрном списке отозванных
-// токенов. Метод существует именно для того, чтобы внешний resource-сервер
-// мог передать его прямо в pqt.ValidateOptions.IsRevoked — у него
-// совпадает сигнатура.
+// токенов. Метод существует именно для того, чтобы внешний
+// resource-сервер мог передать его прямо в pqt.ValidateOptions.IsRevoked —
+// у этих двух функций совпадает сигнатура `func(string) bool`, и
+// никакой обёртки не нужно.
 func (s *Server) IsRevoked(jti string) bool {
 	return s.revoked.IsRevoked(jti)
 }
 
-// writeJSON сериализует value в JSON и пишет ответ с указанным статусом.
-// Ошибки кодирования логируются, но не пробрасываются — заголовок к этому
-// моменту уже отправлен и сделать ничего не получится.
+// writeJSON сериализует value в JSON и пишет ответ с указанным
+// HTTP-статусом. Ошибки сериализации логируются, но не возвращаются
+// наружу: к моменту, когда мы их обнаружим, заголовки ответа уже
+// отправлены клиенту и поменять статус всё равно нельзя.
 func (s *Server) writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -119,8 +148,15 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, value any) {
 	}
 }
 
-// writeOAuthError отвечает в формате OAuth 2.0 (RFC 6749 §5.2):
-// {"error":"...", "error_description":"..."}.
+// writeOAuthError отвечает клиенту в формате ошибок OAuth 2.0
+// (RFC 6749 §5.2):
+//
+//	{"error": "invalid_grant", "error_description": "..."}
+//
+// Поле error содержит код из стандартного набора (invalid_request,
+// invalid_grant, unauthorized_client и т. д.). Поле error_description
+// — свободный текст для логов и отладки; клиенту полагаться на
+// конкретный текст не стоит.
 func (s *Server) writeOAuthError(w http.ResponseWriter, status int, code, description string) {
 	s.writeJSON(w, status, oauthError{Error: code, Description: description})
 }
@@ -130,10 +166,23 @@ type oauthError struct {
 	Description string `json:"error_description,omitempty"`
 }
 
-// limitScope ограничивает запрошенный набор scope тем, что разрешено
-// пользователю. Возвращает пересечение в исходном порядке, разделённое
-// пробелами. RFC 6749 §3.3 не гарантирует ни порядок, ни обязательное
-// возвращение поля — но детерминированный порядок упрощает тесты.
+// limitScope ограничивает запрошенный клиентом набор scope тем
+// набором, который разрешён пользователю. Возвращает пересечение
+// двух множеств в порядке, в котором клиент запросил, через пробел.
+//
+// Примеры:
+//
+//	requested="read write", allowed="read write admin" → "read write"
+//	requested="read admin",  allowed="read write"        → "read"
+//	requested="",            allowed="read write"        → "read write"
+//
+// Пустой запрос трактуется как «дай всё, что у меня есть» — это
+// удобное поведение для prototype, в production-сценариях можно
+// потребовать явный список.
+//
+// RFC 6749 §3.3 не гарантирует ни порядок, ни обязательное
+// возвращение поля scope в ответе сервера, но детерминированный
+// порядок очень упрощает тесты, поэтому возвращаем по порядку запроса.
 func limitScope(requested, allowed string) string {
 	if requested == "" {
 		return allowed
@@ -149,8 +198,11 @@ func limitScope(requested, allowed string) string {
 }
 
 // newJTI генерирует уникальный идентификатор токена (claim jti).
-// 16 случайных байт в Base64url — это 128 бит энтропии, более чем достаточно,
-// чтобы коллизия в практически любом масштабе была невозможна.
+// Берём 16 случайных байт из crypto/rand — это 128 бит энтропии — и
+// кодируем в base64url. Этого с запасом хватает, чтобы случайная
+// коллизия двух токенов была невозможна на практике (даже миллиард
+// токенов в секунду в течение 100 лет дадут вероятность коллизии
+// исчезающе малую).
 func newJTI() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {

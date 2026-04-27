@@ -11,16 +11,24 @@ import (
 	"pqt/token"
 )
 
-// Server — resource-сервер. Создаётся через New, дальше используется как
-// обычный http.Handler.
+// Server — собранный resource-сервер. Поля внутри неэкспортируемые: всё
+// взаимодействие снаружи идёт через метод Handler (даёт http.Handler для
+// http.Server) и JWKS (доступ к клиенту JWKS, полезно в тестах).
 type Server struct {
 	cfg     Config
 	jwks    *JWKSClient
 	handler http.Handler
 }
 
-// New собирает Server по конфигу. Сразу же делает первичный fetch JWKS
-// с auth-сервера, чтобы при первом запросе уже не было сетевой задержки.
+// New собирает Server по конфигу: проверяет/нормализует поля, поднимает
+// клиент JWKS и регистрирует маршруты.
+//
+// На старте сервер сразу пробует скачать JWKS с auth-сервера. Это нужно,
+// чтобы первый же входящий запрос не ждал пока сервер сходит за ключами по
+// сети — пользователь почувствует разницу. Если auth-сервер сейчас
+// недоступен, мы всё равно стартуем: JWKSClient умеет дёрнуть JWKS на
+// лету при первом cache-miss, так что ситуация починится сама. В лог
+// уходит предупреждение, чтобы было видно — что-то не так.
 func New(cfg Config) (*Server, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -33,8 +41,6 @@ func New(cfg Config) (*Server, error) {
 	jwksClient := NewJWKSClient(cfg.AuthServerBaseURL, httpClient, cfg.Logger)
 
 	if err := jwksClient.Refresh(context.Background()); err != nil {
-		// Стартуем даже если auth-сервер недоступен: при первом валидном
-		// запросе JWKSClient попробует ещё раз. Логируем как warning.
 		cfg.Logger.Warn("resourceserver: первичная загрузка JWKS не удалась — попробуем на лету",
 			"err", err)
 	}
@@ -53,20 +59,24 @@ func New(cfg Config) (*Server, error) {
 	return s, nil
 }
 
-// Handler возвращает http.Handler сервера для подключения к http.Server.
+// Handler возвращает готовый http.Handler сервера. В main достаточно
+// передать его в http.Server{Handler: srv.Handler()}.
 func (s *Server) Handler() http.Handler {
 	return s.handler
 }
 
-// JWKS возвращает внутренний JWKS-клиент. Полезно для интеграционных тестов
-// и для дополнительных middleware, которым нужен резолвер ключей.
+// JWKS возвращает внутренний клиент JWKS. Нужно интеграционным тестам,
+// чтобы вручную дёрнуть Refresh и убедиться, что ключи перекачались, а
+// также дополнительным middleware, которым нужен тот же резолвер ключей,
+// что использует основной обработчик.
 func (s *Server) JWKS() *JWKSClient {
 	return s.jwks
 }
 
-// validateOptions собирает pqt.ValidateOptions из конфига сервера.
-// Выделено отдельным методом, чтобы тесты могли подменить только KeySource
-// (например, на функцию, которая всегда возвращает ключ из памяти).
+// validateOptions собирает набор настроек для pqt.Validate из конфига
+// сервера. Вынесено в отдельный метод, чтобы тесты могли подменить только
+// KeySource — например, на функцию, которая возвращает ключ прямо из
+// памяти, минуя JWKS-клиент и сетевые походы.
 func (s *Server) validateOptions() pqt.ValidateOptions {
 	return pqt.ValidateOptions{
 		KeySource: func(h token.Header) (keys.PublicKey, error) {
@@ -91,8 +101,9 @@ func (s *Server) routes() http.Handler {
 	return mux
 }
 
-// handleMe возвращает claims из контекста — это самый простой способ
-// показать клиенту «кто я с точки зрения этого сервиса».
+// handleMe возвращает claims из контекста запроса — простейший эндпоинт,
+// показывающий клиенту, как сервер его «увидел»: какой sub, какие scope,
+// когда токен истечёт. Удобно для отладки интеграции и для демо.
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	claims, ok := ClaimsFromContext(r.Context())
 	if !ok {
@@ -103,8 +114,10 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, claims)
 }
 
-// handleAdmin — демо-эндпоинт «только для админов». Если до сюда долетел
-// запрос — middleware уже убедился, что в scope есть admin.
+// handleAdmin — демо-эндпоинт, к которому пускают только пользователей с
+// scope=admin. Сама проверка scope уже сделана выше в цепочке через
+// RequireScope("admin"); если запрос дошёл до этого обработчика — значит,
+// токен валиден и право admin у клиента есть.
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	claims, _ := ClaimsFromContext(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{

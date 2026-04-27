@@ -4,22 +4,30 @@ import (
 	"net/http"
 )
 
-// discoveryDocument — ответ /.well-known/oauth-authorization-server (RFC 8414).
+// discoveryDocument — тело ответа на /.well-known/oauth-authorization-server.
 //
-// Поля собраны минимальным осмысленным набором для нашего сервера:
-//   - issuer — обязательное поле по RFC 8414 §2.
-//   - token_endpoint, jwks_uri, revocation_endpoint — адреса эндпоинтов,
-//     которые сервер действительно реализует.
-//   - response_types_supported — обязательное по RFC поле; у нас пустой
-//     массив, потому что реализованы только сценарии на /auth/token
-//     (password, refresh_token), а authorization-code flow с
-//     response_type — нет.
-//   - grant_types_supported — какие значения grant_type принимают
-//     /auth/token и /auth/refresh.
+// Это «паспорт» OAuth-сервера по RFC 8414. Клиент дёргает один URL и из
+// JSON-ответа узнаёт, куда ему отправлять реальные запросы — на какой
+// адрес выпускать токен, где брать публичные ключи, какие grant-ы
+// поддерживаются. Без этого документа клиент или человек должен прописывать
+// все адреса вручную в конфиге.
+//
+// Поля собраны минимальным осмысленным набором именно для нашего сервера:
+//   - issuer — кто выпускает токены, обязательное поле по RFC 8414 §2.
+//   - token_endpoint, jwks_uri, revocation_endpoint — конкретные адреса
+//     эндпоинтов, которые сервер действительно реализует.
+//   - response_types_supported — обязательное поле RFC. Это значения для
+//     authorization code flow (например, "code" или "token"), который у
+//     нас не реализован. Пустой массив честно говорит: «таких сценариев
+//     здесь нет, не пробуй».
+//   - grant_types_supported — какие значения grant_type принимают наши
+//     /auth/token и /auth/refresh. Только password и refresh_token.
 //   - token_endpoint_auth_methods_supported — как клиент должен
-//     представляться на /auth/token. У нас password grant без client_id,
-//     поэтому "none".
-//   - scopes_supported — реальный набор scope, выданный seed-пользователям.
+//     представляться при запросе токена. У нас password grant без
+//     регистрации клиентов, поэтому единственный метод — "none"
+//     (клиент не аутентифицируется отдельно от пользователя).
+//   - scopes_supported — реальный набор scope, выданный seed-пользователям
+//     (read/write/admin).
 type discoveryDocument struct {
 	Issuer                                 string   `json:"issuer"`
 	TokenEndpoint                          string   `json:"token_endpoint"`
@@ -32,11 +40,16 @@ type discoveryDocument struct {
 	ScopesSupported                        []string `json:"scopes_supported"`
 }
 
-// handleDiscovery — GET /.well-known/oauth-authorization-server (RFC 8414).
+// handleDiscovery — GET /.well-known/oauth-authorization-server.
 //
-// Метаданные сервера: issuer и адреса всех эндпоинтов. Клиенты по этому
-// документу автоматически узнают, куда отправлять запросы; инструменты
-// вроде pqt-cli — где скачать JWKS, не задавая адрес руками.
+// Возвращает discoveryDocument в JSON. Клиенты (включая наш pqt-cli и
+// вебка из webui/) дёргают этот URL один раз при старте и дальше уже знают
+// точные адреса для запроса токена, отзыва и набора публичных ключей —
+// не нужно прописывать каждый эндпоинт в конфиге руками.
+//
+// Cache-Control: max-age=300 (5 минут) — документ меняется крайне редко
+// (только при перенастройке сервера), так что 5 минут на стороне клиента
+// безопасны и снижают нагрузку.
 func (s *Server) handleDiscovery(w http.ResponseWriter, _ *http.Request) {
 	doc := discoveryDocument{
 		Issuer:                                 s.cfg.Issuer,
