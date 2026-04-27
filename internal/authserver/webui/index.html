@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>PQ-AT — демонстрация</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>PQ-AT — демонстрация</h1>
+  <p>
+    Прототип постквантового токена доступа из магистерской диссертации.
+    Документация API — <a href="/docs/">Swagger UI</a>.
+  </p>
+</header>
+
+<section class="card">
+  <h2>1. Логин</h2>
+  <p class="hint">
+    POST <code>/auth/token</code> с grant_type=password.
+    Доступные seed-учётки: <code>alice</code> / <code>alice-password-2026</code>,
+    <code>bob</code> / <code>bob-password-2026</code>,
+    <code>charlie</code> / <code>charlie-password-2026</code>,
+    <code>dave</code> / <code>dave-password-2026</code>.
+  </p>
+  <form id="login-form">
+    <label>Логин <input name="username" value="alice" required></label>
+    <label>Пароль <input name="password" value="alice-password-2026" type="password" required></label>
+    <label>Scope (необязательно) <input name="scope" placeholder="read write"></label>
+    <button type="submit">Получить токены</button>
+  </form>
+  <pre id="login-result" class="result"></pre>
+</section>
+
+<section class="card">
+  <h2>2. Обновление по refresh-токену</h2>
+  <p class="hint">
+    POST <code>/auth/refresh</code> с grant_type=refresh_token. Refresh подставляется
+    из результата логина; rotation инвалидирует старый.
+  </p>
+  <form id="refresh-form">
+    <label>Refresh-токен
+      <textarea name="refresh_token" rows="2" placeholder="eyJ..."></textarea>
+    </label>
+    <button type="submit">Обновить</button>
+  </form>
+  <pre id="refresh-result" class="result"></pre>
+</section>
+
+<section class="card">
+  <h2>3. Отзыв токена</h2>
+  <p class="hint">POST <code>/auth/revoke</code>. Подсказка типа берётся из claim kind.</p>
+  <form id="revoke-form">
+    <label>Токен
+      <textarea name="token" rows="2"></textarea>
+    </label>
+    <button type="submit">Отозвать</button>
+  </form>
+  <pre id="revoke-result" class="result"></pre>
+</section>
+
+<section class="card">
+  <h2>4. Декодирование (без проверки подписи)</h2>
+  <p class="hint">Клиентский разбор header и claims из текстового токена. Подпись не сверяется.</p>
+  <form id="decode-form">
+    <label>Токен
+      <textarea name="token" rows="2"></textarea>
+    </label>
+    <button type="submit">Разобрать</button>
+  </form>
+  <pre id="decode-result" class="result"></pre>
+</section>
+
+<section class="card">
+  <h2>5. Публичные ключи (JWKS)</h2>
+  <p class="hint">GET <code>/.well-known/pq-jwks</code>.</p>
+  <button id="jwks-btn">Загрузить JWKS</button>
+  <pre id="jwks-result" class="result"></pre>
+</section>
+
+<section class="card">
+  <h2>6. Метаданные сервера авторизации</h2>
+  <p class="hint">GET <code>/.well-known/oauth-authorization-server</code> (RFC 8414).</p>
+  <button id="discovery-btn">Загрузить</button>
+  <pre id="discovery-result" class="result"></pre>
+</section>
+
+<footer>
+  <p>
+    Тимофеенко С. В., ВГУ ФКН, 2026. Магистерская диссертация
+    «Построение токена постквантового доступа».
+  </p>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

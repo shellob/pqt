@@ -1,0 +1,354 @@
+components:
+  schemas:
+    Claims:
+      properties:
+        aud:
+          type: string
+        exp:
+          format: int64
+          type: integer
+        iat:
+          format: int64
+          type: integer
+        iss:
+          type: string
+        jti:
+          type: string
+        kind:
+          enum:
+          - access
+          - refresh
+          type: string
+        scope:
+          type: string
+        sub:
+          type: string
+      type: object
+    Discovery:
+      properties:
+        grant_types_supported:
+          items:
+            type: string
+          type: array
+        issuer:
+          type: string
+        jwks_uri:
+          type: string
+        response_types_supported:
+          items:
+            type: string
+          type: array
+        revocation_endpoint:
+          type: string
+        revocation_endpoint_auth_methods_supported:
+          items:
+            type: string
+          type: array
+        scopes_supported:
+          items:
+            type: string
+          type: array
+        token_endpoint:
+          type: string
+        token_endpoint_auth_methods_supported:
+          items:
+            type: string
+          type: array
+      required:
+      - issuer
+      - token_endpoint
+      - jwks_uri
+      type: object
+    JWK:
+      properties:
+        alg:
+          type: string
+        components:
+          items:
+            type: object
+          type: array
+        crv:
+          type: string
+        kid:
+          type: string
+        kty:
+          enum:
+          - EC
+          - MLDSA
+          - Hybrid
+          type: string
+        pub:
+          type: string
+        use:
+          type: string
+        x:
+          type: string
+        "y":
+          type: string
+      required:
+      - kty
+      type: object
+    JWKSet:
+      properties:
+        keys:
+          items: {}
+          type: array
+      required:
+      - keys
+      type: object
+    OAuthError:
+      properties:
+        error:
+          type: string
+        error_description:
+          type: string
+      required:
+      - error
+      type: object
+    TokenResponse:
+      properties:
+        access_token:
+          type: string
+        expires_in:
+          type: integer
+        refresh_expires_in:
+          type: integer
+        refresh_token:
+          type: string
+        scope:
+          type: string
+        token_type:
+          enum:
+          - Bearer
+          type: string
+      required:
+      - access_token
+      - token_type
+      - expires_in
+      type: object
+  securitySchemes:
+    BearerAuth:
+      bearerFormat: PQ-AT
+      description: Access-токен PQ-AT, выпущенный pqt-authserver через POST /auth/token.
+      scheme: bearer
+      type: http
+info:
+  contact:
+    name: Тимофеенко С. В.
+    url: https://github.com/shellob/pqt
+  description: Прототип постквантового токена доступа (PQ-AT). Включает сервер авторизации
+    и сервер ресурсов.
+  title: PQ-AT API
+  version: 1.0.0
+openapi: 3.1.0
+paths:
+  /.well-known/oauth-authorization-server:
+    get:
+      description: OAuth 2.0 Authorization Server Metadata (RFC 8414).
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Discovery'
+          description: Документ с адресами эндпоинтов и поддерживаемыми возможностями.
+      summary: Метаданные сервера авторизации
+      tags:
+      - well-known
+  /.well-known/pq-jwks:
+    get:
+      description: 'JWKS (RFC 7517 §5). Расширения PQ-AT: kty=MLDSA для постквантовой
+        ML-DSA, kty=Hybrid для гибридной пары.'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JWKSet'
+          description: JWK Set с публичными ключами.
+      summary: Получить публичные ключи сервера
+      tags:
+      - well-known
+  /admin:
+    get:
+      description: Требует scope=admin в claim scope. Без него возвращается 403 insufficient_scope.
+      responses:
+        "200":
+          description: Доступ разрешён.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+          description: Токен невалиден.
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+          description: У токена нет scope=admin.
+      security:
+      - BearerAuth: []
+      servers:
+      - description: pqt-resource
+        url: http://localhost:8081
+      summary: Защищённый эндпоинт только для admin-scope
+      tags:
+      - resource
+  /auth/refresh:
+    post:
+      description: 'Rotation: старый refresh инвалидируется, выдаётся новая пара.'
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              properties:
+                grant_type:
+                  description: Должно быть 'refresh_token'.
+                  type: string
+                refresh_token:
+                  description: Refresh-токен, выданный ранее POST /auth/token.
+                  type: string
+              required:
+              - grant_type
+              - refresh_token
+              type: object
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+          description: Успешный rotation.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+          description: Неправильные параметры запроса.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+          description: Refresh-токен невалиден или уже использован.
+      summary: Обновить access по refresh-токену
+      tags:
+      - auth
+  /auth/revoke:
+    post:
+      description: RFC 7009. Access попадает в blacklist по jti, refresh-сессия удаляется.
+        По §2.2 успех возвращается даже если токен не найден.
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              properties:
+                token:
+                  description: Сам токен, который нужно отозвать.
+                  type: string
+                token_type_hint:
+                  description: 'Подсказка типа: access_token | refresh_token. Используется
+                    только если в токене нет claim kind.'
+                  type: string
+              required:
+              - token
+              type: object
+        required: true
+      responses:
+        "200":
+          description: Токен отозван (или не найден — RFC 7009 §2.2).
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+          description: Не указан параметр token.
+      summary: Отозвать access или refresh-токен
+      tags:
+      - auth
+  /auth/token:
+    post:
+      description: OAuth 2.0 Resource Owner Password Credentials Grant (RFC 6749 §4.3).
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              properties:
+                grant_type:
+                  description: Должно быть 'password'.
+                  type: string
+                password:
+                  description: Пароль из seed-набора.
+                  type: string
+                scope:
+                  description: Запрашиваемые scope через пробел (опционально).
+                  type: string
+                username:
+                  description: Логин из seed-набора (alice/bob/charlie/dave).
+                  type: string
+              required:
+              - grant_type
+              - username
+              - password
+              type: object
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+          description: Успешный логин — выпущена пара токенов.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+          description: Неправильные параметры запроса.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+          description: Неверный логин или пароль.
+      summary: Выпустить пару access + refresh
+      tags:
+      - auth
+  /me:
+    get:
+      description: Берёт claims из контекста, который ставит middleware RequireValidToken.
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Claims'
+          description: Claims токена.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+          description: Заголовок Authorization отсутствует или токен невалиден.
+      security:
+      - BearerAuth: []
+      servers:
+      - description: pqt-resource
+        url: http://localhost:8081
+      summary: Вернуть claims текущего пользователя
+      tags:
+      - resource
+servers:
+- description: pqt-authserver (по умолчанию)
+  url: http://localhost:8080
+- description: pqt-resource
+  url: http://localhost:8081
+tags:
+- description: Эндпоинты сервера авторизации
+  name: auth
+- description: Стандартные публичные эндпоинты (JWKS, OAuth metadata)
+  name: well-known
+- description: Защищённые эндпоинты сервера ресурсов
+  name: resource

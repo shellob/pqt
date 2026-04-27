@@ -1,0 +1,110 @@
+/* Минимальная вёрстка демо-страницы. Без фреймворков и сборщиков. */
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  background: #f5f5f7;
+  color: #1d1d1f;
+  line-height: 1.5;
+}
+
+header, footer {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem;
+}
+
+header h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.6rem;
+}
+
+header p, footer p {
+  margin: 0;
+  color: #515154;
+  font-size: 0.95rem;
+}
+
+.card {
+  max-width: 880px;
+  margin: 1rem auto;
+  background: #fff;
+  border: 1px solid #e2e2e6;
+  border-radius: 8px;
+  padding: 1.25rem 1.25rem 1rem;
+}
+
+.card h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+}
+
+.hint {
+  color: #515154;
+  font-size: 0.9rem;
+  margin: 0 0 0.85rem;
+}
+
+label {
+  display: block;
+  margin: 0 0 0.6rem;
+  font-size: 0.9rem;
+  color: #515154;
+}
+
+input, textarea {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  margin-top: 0.25rem;
+  border: 1px solid #d2d2d7;
+  border-radius: 6px;
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 0.9rem;
+  background: #fafafc;
+}
+
+input:focus, textarea:focus {
+  outline: 2px solid #6e8efb;
+  border-color: #6e8efb;
+}
+
+button {
+  appearance: none;
+  border: none;
+  background: #1d1d1f;
+  color: #fff;
+  padding: 0.55rem 1.1rem;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+
+button:hover { background: #3a3a3c; }
+
+.result {
+  margin: 0.85rem 0 0;
+  padding: 0.85rem 1rem;
+  background: #f0f0f3;
+  border-radius: 6px;
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 1.5rem;
+  color: #1d1d1f;
+}
+
+code {
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 0.88em;
+  background: #ececef;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+}
+
+a { color: #0066cc; }
+a:hover { text-decoration: underline; }

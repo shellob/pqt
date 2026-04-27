@@ -1,16 +1,16 @@
-// Команда pqt-openapi-gen генерирует api/openapi.yaml из go-кода
+// Команда pqt-openapi-gen генерирует OpenAPI-спеку из Go-кода
 // (см. internal/openapi.Build).
 //
 // Запускается вручную перед коммитом:
 //
 //	go run ./cmd/pqt-openapi-gen
 //
-// Если нужен другой путь:
+// По умолчанию пишет в две локации сразу:
 //
-//	go run ./cmd/pqt-openapi-gen --out path/to/openapi.yaml
+//	api/openapi.yaml                         — публичный артефакт для чтения и CI;
+//	internal/authserver/webui/openapi.yaml   — копия для embed в auth-сервер.
 //
-// Файл api/openapi.yaml коммитится в репозиторий — это позволяет читать
-// спеку (или открывать в Swagger UI) без запуска генератора.
+// Можно явно указать одну цель через --out path/to/openapi.yaml.
 package main
 
 import (
@@ -24,19 +24,29 @@ import (
 	"pqt/internal/openapi"
 )
 
-const defaultOut = "api/openapi.yaml"
+// defaultPaths — куда писать YAML по умолчанию. Перечислены в порядке записи;
+// первый используется в логах, остальные пишутся теми же байтами.
+var defaultPaths = []string{
+	"api/openapi.yaml",
+	"internal/authserver/webui/openapi.yaml",
+}
 
 func main() {
-	out := flag.String("out", defaultOut, "куда записать YAML-файл")
+	out := flag.String("out", "", "явный путь для YAML; если пустой, пишутся обе дефолтные локации")
 	flag.Parse()
 
-	if err := run(*out); err != nil {
+	targets := defaultPaths
+	if *out != "" {
+		targets = []string{*out}
+	}
+
+	if err := run(targets); err != nil {
 		fmt.Fprintf(os.Stderr, "pqt-openapi-gen: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(outPath string) error {
+func run(targets []string) error {
 	doc := openapi.Build()
 
 	if err := doc.Validate(context.Background()); err != nil {
@@ -55,12 +65,13 @@ func run(outPath string) error {
 		return fmt.Errorf("JSON→YAML: %w", err)
 	}
 
-	// 0o644: api/openapi.yaml — публичный документ (спецификация API),
-	// смысла прятать его за 0o600 нет.
-	if err := os.WriteFile(outPath, yamlBytes, 0o644); err != nil { //nolint:gosec // публичный документ
-		return fmt.Errorf("запись %q: %w", outPath, err)
+	for _, path := range targets {
+		// 0o644: openapi.yaml — публичный документ (спецификация API),
+		// смысла прятать его за 0o600 нет.
+		if err := os.WriteFile(path, yamlBytes, 0o644); err != nil { //nolint:gosec // публичный документ
+			return fmt.Errorf("запись %q: %w", path, err)
+		}
+		fmt.Fprintf(os.Stderr, "записано: %s (%d байт)\n", path, len(yamlBytes))
 	}
-
-	fmt.Fprintf(os.Stderr, "записано: %s (%d байт)\n", outPath, len(yamlBytes))
 	return nil
 }

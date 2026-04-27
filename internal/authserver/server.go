@@ -79,6 +79,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /.well-known/pq-jwks", s.handleJWKS)
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleDiscovery)
 
+	s.registerWebUI(mux)
+
 	if s.cfg.Debug {
 		registerPprof(mux)
 		s.cfg.Logger.Warn("authserver: /debug/pprof включён — не оставлять в production")
