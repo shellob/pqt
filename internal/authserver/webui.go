@@ -8,9 +8,10 @@ import (
 	swgui "github.com/swaggest/swgui/v5"
 )
 
-// Статика демо-страницы и копия OpenAPI-спеки. Лежит в подпапке webui/,
-// чтобы embed мог увидеть её без пути «..» — это требование go:embed.
-// Регенерация openapi.yaml — командой `go run ./cmd/pqt-openapi-gen`.
+// Статика демо-страницы и копия OpenAPI-спеки. Файлы лежат в подпапке
+// webui/ рядом с этим файлом — этого требует директива //go:embed: ходить
+// «вверх» на ../ ей запрещено, поэтому держим всё в локальной поддиректории.
+// Перегенерировать openapi.yaml — командой `go run ./cmd/pqt-openapi-gen`.
 //
 //go:embed webui/index.html webui/app.js webui/style.css webui/openapi.yaml
 var webuiFS embed.FS
@@ -20,10 +21,13 @@ const (
 	openAPIYAMLPath = "webui/openapi.yaml"
 )
 
-// staticAssets — белый список файлов, доступных через /static/. Используется
-// явный список, а не http.FileServer над всем embed-делом: иначе можно было
-// бы случайно отдавать index.html через /static/, и при изменении набора
-// файлов поверхность раздачи менялась бы непредсказуемо.
+// staticAssets — белый список файлов, которые отдаются через /static/.
+// Сделано явным списком, а не через http.FileServer поверх всей embed-FS,
+// по двум причинам: (1) http.FileServer на /static/ молча отдал бы
+// index.html (это его дефолтное поведение для директорий) — а у нас
+// index.html обслуживается отдельно через /; (2) при добавлении новых
+// файлов в webui/ они бы автоматически становились публично доступны
+// под /static/, что неожиданно расширяет поверхность раздачи.
 var staticAssets = map[string]struct {
 	embedPath   string
 	contentType string
@@ -42,16 +46,18 @@ var staticAssets = map[string]struct {
 // Регистрация только этих эндпоинтов; всё API сервера (auth/*, .well-known/*)
 // остаётся на тех же URL, что и раньше.
 func (s *Server) registerWebUI(mux *http.ServeMux) {
-	// {$} — Go 1.22 mux: точно корневой путь, не префикс. Без этого паттерн
-	// "GET /" матчил бы любой GET на любой URL и ломал поведение остальных
-	// маршрутов (например, GET /auth/token — должен быть 405, а не отдавать
-	// index.html).
+	// {$} — синтаксис Go 1.22 mux, означающий «строго корневой путь, а не
+	// префикс». Без него паттерн "GET /" совпадал бы с любым GET-запросом
+	// на любой URL и ломал поведение остальных маршрутов: например,
+	// GET /auth/token обязан возвращать 405 Method Not Allowed, а не
+	// отдавать главную страницу.
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /static/", s.handleStatic)
 	mux.HandleFunc("GET /docs/openapi.yaml", s.handleOpenAPI)
 
-	// Swagger UI обслуживается готовым handler'ом из swgui — он сам отдаёт
-	// HTML-страницу и подключает встроенные swagger-ui-dist ассеты.
+	// Swagger UI обслуживается готовым обработчиком из swgui — он сам отдаёт
+	// HTML-страницу и подключает встроенные внутри пакета ассеты
+	// swagger-ui-dist (без обращения к CDN).
 	swaggerHandler := swgui.NewHandler("PQ-AT API", "/docs/openapi.yaml", "/docs/")
 	mux.Handle("GET /docs/", swaggerHandler)
 }
@@ -65,15 +71,16 @@ func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// no-cache на index.html: перезапустили сервер, обновили UI — изменения
-	// видны без ctrl-shift-r у клиента.
+	// no-cache на index.html: после перезапуска сервера и обновления
+	// HTML-разметки клиент сразу видит свежую страницу, без ctrl-shift-r
+	// и обхода кэша браузера.
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(data)
 }
 
 // handleStatic отдаёт ассеты страницы по белому списку staticAssets. Любой
-// запрос вне списка возвращает 404 — это исключает случайную раздачу
-// index.html через /static/ и листинг embed-директории.
+// запрос вне этого списка возвращает 404 — так исключается и случайная
+// раздача index.html через /static/, и листинг содержимого embed-директории.
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/static/")
 	asset, ok := staticAssets[name]

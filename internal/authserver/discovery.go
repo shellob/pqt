@@ -6,18 +6,20 @@ import (
 
 // discoveryDocument — ответ /.well-known/oauth-authorization-server (RFC 8414).
 //
-// Поля выбраны минимальным осмысленным набором для нашего сервера:
-//   - issuer — обязательное поле RFC 8414 §2.
-//   - token_endpoint, jwks_uri, revocation_endpoint — endpoint'ы, которые
-//     сервер действительно реализует.
-//   - response_types_supported — обязательное поле; пустой массив, потому
-//     что мы реализуем только token-endpoint flows (password, refresh_token),
-//     а не authorization-code flow с response_type.
-//   - grant_types_supported — какие grant_type принимает /auth/token и
-//     /auth/refresh.
-//   - token_endpoint_auth_methods_supported — как клиент аутентифицируется
-//     на token-эндпоинте. У нас grant=password без client_id, поэтому "none".
-//   - scopes_supported — фактический набор scope, известный seed-пользователям.
+// Поля собраны минимальным осмысленным набором для нашего сервера:
+//   - issuer — обязательное поле по RFC 8414 §2.
+//   - token_endpoint, jwks_uri, revocation_endpoint — адреса эндпоинтов,
+//     которые сервер действительно реализует.
+//   - response_types_supported — обязательное по RFC поле; у нас пустой
+//     массив, потому что реализованы только сценарии на /auth/token
+//     (password, refresh_token), а authorization-code flow с
+//     response_type — нет.
+//   - grant_types_supported — какие значения grant_type принимают
+//     /auth/token и /auth/refresh.
+//   - token_endpoint_auth_methods_supported — как клиент должен
+//     представляться на /auth/token. У нас password grant без client_id,
+//     поэтому "none".
+//   - scopes_supported — реальный набор scope, выданный seed-пользователям.
 type discoveryDocument struct {
 	Issuer                                 string   `json:"issuer"`
 	TokenEndpoint                          string   `json:"token_endpoint"`
@@ -32,9 +34,9 @@ type discoveryDocument struct {
 
 // handleDiscovery — GET /.well-known/oauth-authorization-server (RFC 8414).
 //
-// Метаданные сервера: issuer и адреса эндпоинтов. Клиенты используют их,
-// чтобы автоматически настроиться, а инструменты вроде pqt-cli — чтобы
-// узнать JWKS-адрес без ручной конфигурации.
+// Метаданные сервера: issuer и адреса всех эндпоинтов. Клиенты по этому
+// документу автоматически узнают, куда отправлять запросы; инструменты
+// вроде pqt-cli — где скачать JWKS, не задавая адрес руками.
 func (s *Server) handleDiscovery(w http.ResponseWriter, _ *http.Request) {
 	doc := discoveryDocument{
 		Issuer:                                 s.cfg.Issuer,

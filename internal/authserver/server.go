@@ -12,7 +12,7 @@ import (
 
 // Server — сервер авторизации PQ-AT. После создания через New его можно
 // использовать как обычный http.Handler — например, через httptest.NewServer
-// в тестах или http.Server в production.
+// в тестах или http.Server в боевой среде.
 type Server struct {
 	cfg     Config
 	keys    *KeyStore
@@ -56,8 +56,8 @@ func New(cfg Config) (*Server, error) {
 	return s, nil
 }
 
-// Handler возвращает http.Handler сервера. Сюда можно вешать дополнительный
-// middleware и подключать к http.Server.
+// Handler возвращает http.Handler сервера. Поверх него можно навесить
+// дополнительный middleware и подключить к http.Server.
 func (s *Server) Handler() http.Handler {
 	return s.handler
 }
@@ -68,9 +68,9 @@ func (s *Server) Issuer() string {
 	return s.cfg.Issuer
 }
 
-// routes собирает таблицу маршрутов. Используются паттерны Go 1.22+ с
-// явным указанием HTTP-метода — несоответствие методу даёт 405, а не молчаливый
-// 404.
+// routes собирает таблицу маршрутов. Используются паттерны Go 1.22 с явным
+// указанием HTTP-метода в начале — благодаря этому при несоответствии метода
+// сервер отвечает 405 Method Not Allowed, а не тихо отдаёт 404.
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /auth/token", s.handleToken)
@@ -83,14 +83,15 @@ func (s *Server) routes() http.Handler {
 
 	if s.cfg.Debug {
 		registerPprof(mux)
-		s.cfg.Logger.Warn("authserver: /debug/pprof включён — не оставлять в production")
+		s.cfg.Logger.Warn("authserver: /debug/pprof включён — в боевой среде так оставлять нельзя")
 	}
 	return mux
 }
 
-// registerPprof регистрирует стандартные обработчики pprof из net/http/pprof
-// на наш mux. Регистрируем явно (а не через side-effect import "_"), чтобы
-// эндпоинты появлялись только при Debug=true и не висели на DefaultServeMux.
+// registerPprof вешает стандартные обработчики pprof из net/http/pprof на
+// наш mux. Регистрируем явно, а не через скрытый импорт `_ "net/http/pprof"`:
+// иначе эндпоинты pprof автоматически прицепляются к http.DefaultServeMux
+// и поднимаются всегда, без проверки флага Debug.
 func registerPprof(mux *http.ServeMux) {
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
@@ -99,8 +100,10 @@ func registerPprof(mux *http.ServeMux) {
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 }
 
-// IsRevoked возвращает true, если jti в чёрном списке. Метод нужен внешним
-// resource-серверам, которым удобно сразу передать его в pqt.ValidateOptions.IsRevoked.
+// IsRevoked возвращает true, если jti есть в чёрном списке отозванных
+// токенов. Метод существует именно для того, чтобы внешний resource-сервер
+// мог передать его прямо в pqt.ValidateOptions.IsRevoked — у него
+// совпадает сигнатура.
 func (s *Server) IsRevoked(jti string) bool {
 	return s.revoked.IsRevoked(jti)
 }

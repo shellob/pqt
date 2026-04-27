@@ -11,14 +11,15 @@ import (
 )
 
 // maxTokenRequestBody — потолок размера тела запроса на эндпоинты /auth/*.
-// Реальная полезная нагрузка (grant_type+username+password+scope или
-// refresh_token, или отзываемый токен) укладывается в килобайты — 64 КБ
-// с большим запасом и при этом не даёт злоумышленнику съесть память сервера.
+// Реальная полезная нагрузка — это grant_type, username/password или
+// refresh_token, или отзываемый токен; всё это укладывается в килобайты.
+// Лимит 64 КБ берётся с большим запасом и при этом не даёт злоумышленнику
+// прислать гигантский POST и съесть память сервера.
 const maxTokenRequestBody = 64 * 1024
 
 // tokenResponse — успешный ответ эндпоинтов /auth/token и /auth/refresh
-// (RFC 6749 §5.1). Поля для refresh-токена опускаются через omitempty,
-// если refresh не выпускался.
+// (RFC 6749 §5.1). Поля refresh-токена опускаются через omitempty, если
+// refresh не выпускался.
 type tokenResponse struct {
 	AccessToken      string `json:"access_token"`
 	TokenType        string `json:"token_type"`
@@ -30,11 +31,11 @@ type tokenResponse struct {
 
 // handleToken — POST /auth/token.
 //
-// Реализует только grant_type=password (Resource Owner Password Credentials,
-// RFC 6749 §4.3). Для прототипа диссертации это самый прямой способ получить
-// токен: «логин/пароль на вход — токен на выход», без редиректов и
-// authorization code flow. Для реального production OAuth-сервера password
-// grant считается deprecated, но эксперимент главы 4 он не искажает.
+// Реализован только grant_type=password из RFC 6749 §4.3 (Resource Owner
+// Password Credentials). Это самый прямой способ выпустить токен:
+// «логин и пароль на вход — токен на выход», без редиректов и
+// authorization code flow. Для боевого OAuth-сервера password grant
+// считается устаревшим, но эксперимент главы 4 диссертации это не искажает.
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxTokenRequestBody)
 	if err := r.ParseForm(); err != nil {
@@ -79,13 +80,14 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 
 // handleRefresh — POST /auth/refresh.
 //
-// Принимает grant_type=refresh_token + refresh_token. При успехе помечает
-// старый refresh как использованный и выдаёт новую пару (access + новый
-// refresh) — это и есть rotation.
+// Принимает grant_type=refresh_token + сам refresh_token. При успехе помечает
+// старый refresh использованным и выдаёт новую пару (access + новый refresh) —
+// это и есть ротация.
 //
-// Если refresh уже использовался ранее, не существует, отозван, или подпись
-// не сходится — отвечаем единственным кодом invalid_grant без подробностей,
-// чтобы атакующему не удавалось различать сценарии по ответам сервера.
+// Если refresh уже использовали ранее, его нет в хранилище, он отозван или
+// подпись не сходится — отвечаем единственным кодом invalid_grant без
+// подробностей. Это сделано специально: иначе атакующий по разным ответам
+// сервера различал бы сценарии и понимал, есть ли такой токен в системе.
 func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxTokenRequestBody)
 	if err := r.ParseForm(); err != nil {
@@ -115,9 +117,11 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Достаём сессию и помечаем её использованной. MarkUsed возвращает false,
-	// если сессии нет (возможно, сервер перезапускали и она потерялась)
-	// или она уже была использована — это сигнал replay-атаки.
+	// Достаём сессию refresh-токена и помечаем её использованной. MarkUsed
+	// вернёт false в двух случаях: сессии нет (например, сервер
+	// перезапускали и in-memory хранилище потерялось) или её уже один раз
+	// использовали. Второе — признак того, что кто-то прислал нам
+	// «повторно сыгранный» refresh, классическая replay-атака.
 	if !s.refresh.MarkUsed(claims.Jti) {
 		s.cfg.Logger.Warn("authserver: повторное использование refresh-токена",
 			"jti", claims.Jti, "sub", claims.Sub)
@@ -139,14 +143,15 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 
 // handleRevoke — POST /auth/revoke (RFC 7009).
 //
-// Принимает token (обязательно) и опциональный token_type_hint. По RFC §2.2
-// отвечает 200 даже если токен не найден или формата мы не разобрали — это
-// предотвращает утечки информации.
+// Принимает обязательный параметр token и необязательный token_type_hint.
+// По §2.2 RFC мы возвращаем 200 даже если токена не нашли или формат не
+// разобрался — это специально, чтобы по ответу сервера нельзя было понять,
+// есть ли вообще такой токен в системе.
 func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxTokenRequestBody)
 	if err := r.ParseForm(); err != nil {
-		// По RFC ошибки разбора параметров — это invalid_request.
-		// Здесь это допустимо: тело запроса невалидно структурно.
+		// Тело запроса пришло в нечитаемом виде. По RFC 6749 это
+		// invalid_request — структурная ошибка запроса, не отзыва.
 		s.writeOAuthError(w, http.StatusBadRequest, "invalid_request",
 			"не удалось разобрать тело запроса")
 		return
@@ -155,14 +160,14 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	tokenValue := r.PostForm.Get("token")
 	hint := r.PostForm.Get("token_type_hint")
 	if tokenValue == "" {
-		// Сам токен — обязательный параметр (RFC 7009 §2.1).
+		// Параметр token обязательный (RFC 7009 §2.1).
 		s.writeOAuthError(w, http.StatusBadRequest, "invalid_request",
 			"требуется параметр token")
 		return
 	}
 
-	// Сначала разбираем токен и пытаемся понять его тип. Если не получилось —
-	// по RFC всё равно отвечаем 200, ничего не трогая в сторах.
+	// Сначала разбираем токен и пытаемся понять его тип. Если разбор не
+	// удался — по RFC всё равно отвечаем 200, ничего не трогая в хранилищах.
 	header, claims, _, _, err := pqt.Parse([]byte(tokenValue), token.FormatText)
 	if err == nil {
 		s.applyRevocation(header, claims, hint)
@@ -172,11 +177,14 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 }
 
 // applyRevocation удаляет refresh-сессию или добавляет access-jti в чёрный
-// список. Решение принимается строго по claim.Kind токена — это поле подписано
-// и менять его извне нельзя. Hint из тела запроса используется только в
-// единственном случае: токен выпустили до появления Kind (Kind==""), и нам
-// нужна подсказка. Иначе hint игнорируется — иначе атакующий мог бы выдать
-// чужой access-токен за refresh и обнулить blacklist'инг.
+// список. Решение принимается строго по claim.Kind токена — это поле
+// подписано, и менять его извне нельзя. Подсказка из тела запроса
+// (token_type_hint) используется только в одном случае: токен выпустили
+// ещё до появления Kind (Kind пустое), и нам нужна подсказка, что это.
+// В остальных случаях hint игнорируется — иначе атакующий мог бы подсунуть
+// чужой access-токен с hint=refresh_token, и мы вместо чёрного списка
+// access-токенов попытались бы удалить refresh-сессию (которой нет под
+// таким jti) и оставили бы access живым.
 func (s *Server) applyRevocation(_ token.Header, c token.Claims, hint string) {
 	if c.Jti == "" {
 		return
@@ -189,12 +197,14 @@ func (s *Server) applyRevocation(_ token.Header, c token.Claims, hint string) {
 		s.refresh.Delete(c.Jti)
 		return
 	}
-	// access, пустой Kind без полезного hint — всё в blacklist.
+	// Сюда попадаем для access-токена и для токена с пустым Kind без
+	// полезной подсказки — кладём в чёрный список access-токенов.
 	s.revoked.Revoke(c.Jti, s.cfg.Now())
 }
 
-// issuePair выпускает пару (access, refresh) для пользователя с заданным scope.
-// Используется в handleToken (первичный логин) и в handleRefresh (rotation).
+// issuePair выпускает пару (access, refresh) для пользователя с заданным
+// набором scope. Используется и при первичном логине (handleToken), и при
+// ротации refresh-токена (handleRefresh).
 func (s *Server) issuePair(username, scope string) (tokenResponse, error) {
 	keyEntry := s.keys.Default()
 	now := s.cfg.Now()
@@ -209,7 +219,8 @@ func (s *Server) issuePair(username, scope string) (tokenResponse, error) {
 		return tokenResponse{}, err
 	}
 
-	// Сессия refresh — для лукапа в /auth/refresh.
+	// Запоминаем сессию refresh-токена — потом по ней будем искать
+	// в /auth/refresh при попытке обновления.
 	s.refresh.Save(RefreshSession{
 		JTI:       refresh.jti,
 		Username:  username,
@@ -228,8 +239,8 @@ func (s *Server) issuePair(username, scope string) (tokenResponse, error) {
 	}, nil
 }
 
-// issuedToken — внутренний результат issueOne: и сериализованные байты,
-// и jti, чтобы не разбирать токен повторно.
+// issuedToken — то, что возвращает issueOne: сами байты токена и его jti.
+// Хранится отдельно, чтобы не разбирать токен ещё раз только ради jti.
 type issuedToken struct {
 	bytes []byte
 	jti   string
@@ -248,7 +259,7 @@ func (s *Server) issueOne(
 	claims := token.Claims{
 		Sub:   username,
 		Iss:   s.cfg.Issuer,
-		Aud:   s.cfg.Issuer, // для прототипа audience = сам issuer
+		Aud:   s.cfg.Issuer, // для прототипа aud равен iss; в проде здесь стоял бы id клиентского сервиса
 		Iat:   now.Unix(),
 		Exp:   now.Add(ttl).Unix(),
 		Jti:   jti,
@@ -267,9 +278,9 @@ func (s *Server) issueOne(
 	return issuedToken{bytes: tokenBytes, jti: jti}, nil
 }
 
-// validateOwnRefresh проверяет, что присланный refresh-токен подписан текущим
-// сервером, не истёк, не отозван и имеет kind="refresh". Возвращает разобранные
-// claims при успехе.
+// validateOwnRefresh проверяет, что присланный refresh-токен подписан
+// текущим сервером, не истёк, не отозван и имеет kind="refresh". Возвращает
+// разобранные claims при успехе.
 func (s *Server) validateOwnRefresh(refreshToken string) (token.Claims, error) {
 	claims, err := pqt.Validate([]byte(refreshToken), pqt.ValidateOptions{
 		KeySource: func(h token.Header) (keys.PublicKey, error) {
@@ -289,17 +300,17 @@ func (s *Server) validateOwnRefresh(refreshToken string) (token.Claims, error) {
 		return token.Claims{}, err
 	}
 	if claims.Kind != token.KindRefresh {
-		return token.Claims{}, errors.New("kind != refresh")
+		return token.Claims{}, errors.New("в токене kind не равен refresh")
 	}
 	return claims, nil
 }
 
 // handleJWKS — GET /.well-known/pq-jwks.
 //
-// Публикует все публичные ключи сервера в формате jwk.Set, чтобы внешние
-// валидаторы могли проверять подписи токенов. Cache-Control с коротким
-// TTL — компромисс: даём клиентам кешировать, но при ротации ключей не
-// застрянем надолго со старым набором.
+// Публикует все публичные ключи сервера в формате jwk.Set — внешние
+// валидаторы по этому набору проверяют подписи выпущенных нами токенов.
+// Cache-Control с коротким max-age — компромисс: даём клиентам кешировать
+// набор, но при ротации ключей не застрянем надолго со старым.
 func (s *Server) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 	set, err := s.keys.PublicSet()
 	if err != nil {

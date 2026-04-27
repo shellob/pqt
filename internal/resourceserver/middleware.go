@@ -12,35 +12,39 @@ import (
 	"pqt/token"
 )
 
-// claimsCtxKey — ключ для хранения claims в request context. Тип-обёртка
-// нужна, чтобы исключить случайные коллизии с другими пакетами.
+// claimsCtxKey — ключ, под которым middleware кладёт claims в контекст
+// HTTP-запроса. Тип-обёртка нужна, чтобы случайно не столкнуться с такими
+// же ключами из других пакетов (стандартная Go-идиома для context.Value).
 type claimsCtxKey struct{}
 
-// ClaimsFromContext извлекает claims, которые middleware RequireValidToken
-// положил в контекст. Возвращает (claims, false), если контекст без них —
-// например, обработчик вызван минуя middleware.
+// ClaimsFromContext достаёт claims, которые middleware RequireValidToken
+// положил в контекст обработчика. Возвращает (claims, false), если в
+// контексте их нет — например, если обработчик вызвали в обход middleware.
 func ClaimsFromContext(ctx context.Context) (token.Claims, bool) {
 	c, ok := ctx.Value(claimsCtxKey{}).(token.Claims)
 	return c, ok
 }
 
-// withClaims возвращает производный контекст с положенными внутрь claims.
-// Скрыт от внешнего мира — пишет в контекст только middleware.
+// withClaims возвращает производный контекст с положенными claims внутри.
+// Функция сделана приватной — пишет в контекст только middleware, чтобы
+// нельзя было «подкрутить» claims из обычного обработчика мимо проверки.
 func withClaims(parent context.Context, c token.Claims) context.Context {
 	return context.WithValue(parent, claimsCtxKey{}, c)
 }
 
-// Middleware — стандартная Go-сигнатура для http-middleware.
+// Middleware — стандартная Go-сигнатура для http-middleware: функция,
+// которая принимает следующий обработчик и возвращает обёртку над ним.
 type Middleware func(http.Handler) http.Handler
 
 // RequireValidToken возвращает middleware, который пропускает запрос дальше
-// только если в заголовке Authorization лежит валидный токен PQ-AT,
-// проверенный через pqt.Validate с переданными опциями.
+// только при наличии валидного PQ-AT-токена в заголовке Authorization.
+// Проверка делается через pqt.Validate с переданными опциями (KeySource,
+// ExpectedIssuer, ExpectedAudience и т. д.).
 //
-// Извлечённые claims помещаются в контекст и доступны обработчику через
-// ClaimsFromContext. На любую ошибку (нет заголовка, кривой формат,
-// невалидная подпись, истёкший exp, отозван) возвращается 401 с телом
-// в формате RFC 6750 §3.1 (через JSON).
+// При успехе claims извлечённого токена кладутся в контекст запроса —
+// обработчик получает их через ClaimsFromContext. На любую ошибку
+// (нет заголовка, неверный формат, неправильная подпись, истёкший exp,
+// отозванный токен) middleware возвращает 401 с JSON-телом по RFC 6750 §3.1.
 func RequireValidToken(opts pqt.ValidateOptions) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -52,10 +56,13 @@ func RequireValidToken(opts pqt.ValidateOptions) Middleware {
 
 			claims, err := pqt.Validate([]byte(tokenStr), opts)
 			if err != nil {
-				// По RFC 6750 §3.1: "invalid_token" — токен невалиден по
-				// любой причине (просрочен, подделан, отозван, не разобрался).
-				// "invalid_request" мы используем только когда сам HTTP-запрос
-				// сформирован неправильно (нет заголовка Authorization).
+				// По RFC 6750 §3.1 коды разделяются так:
+				//   invalid_request — сам HTTP-запрос построен неправильно
+				//                     (нет заголовка Authorization);
+				//   invalid_token   — токен есть, но он невалиден по любой
+				//                     причине: просрочен, подделан, отозван,
+				//                     не разобрался.
+				// Любая ошибка от pqt.Validate относится ко второй категории.
 				writeUnauthorized(w, "invalid_token", err.Error())
 				return
 			}
@@ -65,19 +72,20 @@ func RequireValidToken(opts pqt.ValidateOptions) Middleware {
 	}
 }
 
-// RequireScope возвращает middleware, который пускает дальше только запросы
-// с claim scope, содержащим заданное значение. Используется поверх
-// RequireValidToken — отдельно от него этот middleware смысла не имеет:
-// без RequireValidToken claims в контексте не будет.
+// RequireScope возвращает middleware, пропускающий запрос дальше только
+// если в claim scope текущего токена присутствует нужное значение. Этот
+// middleware всегда вешается ПОСЛЕ RequireValidToken: без него в контексте
+// нет claims, и проверять было бы нечего.
 func RequireScope(scope string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims, ok := ClaimsFromContext(r.Context())
 			if !ok {
 				// Это не «пользователь не авторизовался», а «разработчик
-				// неправильно собрал цепочку middleware» — RequireValidToken
-				// должен стоять впереди. Возвращаем 500, чтобы такое было
-				// видно в логах, а не маскировалось под 401.
+				// неправильно собрал цепочку middleware»: RequireValidToken
+				// должен стоять впереди. Возвращаем 500, чтобы такая
+				// проблема была сразу заметна в логах, а не маскировалась
+				// под 401 «вы не авторизованы».
 				writeError(w, http.StatusInternalServerError, "server_error",
 					"claims отсутствуют в контексте — поставьте RequireValidToken перед RequireScope")
 				return
@@ -92,8 +100,9 @@ func RequireScope(scope string) Middleware {
 	}
 }
 
-// extractBearerToken достаёт токен из заголовка Authorization: Bearer <token>.
-// Регистронезависимо к слову Bearer (RFC 6750 §2.1).
+// extractBearerToken достаёт сам токен из заголовка вида
+// `Authorization: Bearer <token>`. Слово Bearer сравниваем
+// регистронезависимо — этого требует RFC 6750 §2.1.
 func extractBearerToken(r *http.Request) (string, error) {
 	header := r.Header.Get("Authorization")
 	if header == "" {
@@ -111,7 +120,8 @@ func extractBearerToken(r *http.Request) (string, error) {
 	return tok, nil
 }
 
-// hasScope проверяет, что в строке scope (через пробелы) присутствует want.
+// hasScope проверяет, есть ли в строке scope (записи через пробел)
+// нужное значение want.
 func hasScope(scope, want string) bool {
 	if scope == "" || want == "" {
 		return false
@@ -119,16 +129,17 @@ func hasScope(scope, want string) bool {
 	return slices.Contains(strings.Fields(scope), want)
 }
 
-// errorBody — формат ответа на ошибки middleware. Совпадает по полям с
-// OAuth-ошибкой, чтобы клиенту было меньше кода для разбора.
+// errorBody — формат тела ошибки от middleware. Поля совпадают с теми,
+// что использует OAuth, — клиенту проще писать общий разбор.
 type errorBody struct {
 	Error            string `json:"error"`
 	ErrorDescription string `json:"error_description,omitempty"`
 }
 
 func writeUnauthorized(w http.ResponseWriter, code, description string) {
-	// RFC 6750 §3 рекомендует WWW-Authenticate, но он же вынуждает строить
-	// challenge-строку с экранированием — для прототипа достаточно JSON-тела.
+	// RFC 6750 §3 рекомендует возвращать заголовок WWW-Authenticate с
+	// challenge-строкой, но её правильное составление с экранированием —
+	// нетривиально. Для прототипа диссертации хватает JSON-тела.
 	writeError(w, http.StatusUnauthorized, code, description)
 }
 
