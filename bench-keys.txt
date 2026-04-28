@@ -1,0 +1,30 @@
+﻿goos: windows
+goarch: amd64
+pkg: pqt/keys
+cpu: AMD Ryzen 7 9800X3D 8-Core Processor           
+BenchmarkECDSA_Keygen-16               	  321505	      7476 ns/op	     992 B/op	      17 allocs/op
+BenchmarkECDSA_Sign-16                 	  136372	     17431 ns/op	    6064 B/op	      59 allocs/op
+BenchmarkECDSA_Verify-16               	   61768	     39532 ns/op	     576 B/op	      10 allocs/op
+BenchmarkHybrid_Keygen/mldsa44-16      	   63039	     39134 ns/op	   56432 B/op	      23 allocs/op
+BenchmarkHybrid_Keygen/mldsa65-16      	   32353	     74359 ns/op	   83056 B/op	      23 allocs/op
+BenchmarkHybrid_Keygen/mldsa87-16      	   25686	     91730 ns/op	  118512 B/op	      23 allocs/op
+BenchmarkHybrid_Sign/mldsa44-16        	   65083	     36779 ns/op	   11888 B/op	      64 allocs/op
+BenchmarkHybrid_Sign/mldsa65-16        	   58003	     73857 ns/op	   13424 B/op	      64 allocs/op
+BenchmarkHybrid_Sign/mldsa87-16        	   25137	     96467 ns/op	   16240 B/op	      64 allocs/op
+BenchmarkHybrid_VerifyParallel/mldsa44-16         	   49513	     48809 ns/op	    1266 B/op	      18 allocs/op
+BenchmarkHybrid_VerifyParallel/mldsa65-16         	   48546	     48320 ns/op	    1266 B/op	      18 allocs/op
+BenchmarkHybrid_VerifyParallel/mldsa87-16         	   48938	     48815 ns/op	    1266 B/op	      18 allocs/op
+BenchmarkHybrid_VerifySequential/mldsa44-16       	   48764	     50095 ns/op	    1026 B/op	      13 allocs/op
+BenchmarkHybrid_VerifySequential/mldsa65-16       	   46888	     52095 ns/op	    1026 B/op	      13 allocs/op
+BenchmarkHybrid_VerifySequential/mldsa87-16       	   43374	     56076 ns/op	    1026 B/op	      13 allocs/op
+BenchmarkMLDSA_Keygen/mldsa44-16                  	   42900	     56552 ns/op	   55392 B/op	       5 allocs/op
+BenchmarkMLDSA_Keygen/mldsa65-16                  	   22514	    112182 ns/op	   82016 B/op	       5 allocs/op
+BenchmarkMLDSA_Keygen/mldsa87-16                  	   14206	    182658 ns/op	  117472 B/op	       5 allocs/op
+BenchmarkMLDSA_Sign/mldsa44-16                    	   17641	    162716 ns/op	    3138 B/op	       4 allocs/op
+BenchmarkMLDSA_Sign/mldsa65-16                    	  104733	    305816 ns/op	    3906 B/op	       4 allocs/op
+BenchmarkMLDSA_Sign/mldsa87-16                    	   10000	    200778 ns/op	    5314 B/op	       4 allocs/op
+BenchmarkMLDSA_Verify/mldsa44-16                  	  256359	      9691 ns/op	     450 B/op	       3 allocs/op
+BenchmarkMLDSA_Verify/mldsa65-16                  	  203678	     12431 ns/op	     450 B/op	       3 allocs/op
+BenchmarkMLDSA_Verify/mldsa87-16                  	  122097	     16951 ns/op	     450 B/op	       3 allocs/op
+PASS
+ok  	pqt/keys	108.087s

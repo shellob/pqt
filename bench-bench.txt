@@ -1,0 +1,50 @@
+﻿goos: windows
+goarch: amd64
+pkg: pqt/internal/bench
+cpu: AMD Ryzen 7 9800X3D 8-Core Processor           
+BenchmarkIssue_FormatMatrix/ecdsa-p256_json_text-16         	  121327	     20788 ns/op	    8364 B/op	      72 allocs/op
+BenchmarkIssue_FormatMatrix/ecdsa-p256_json_binary-16       	  122853	     20548 ns/op	    7050 B/op	      65 allocs/op
+BenchmarkIssue_FormatMatrix/ecdsa-p256_cbor_text-16         	  116170	     22076 ns/op	    7891 B/op	      72 allocs/op
+BenchmarkIssue_FormatMatrix/ecdsa-p256_cbor_binary-16       	  120716	     20690 ns/op	    6849 B/op	      65 allocs/op
+BenchmarkIssue_FormatMatrix/mldsa65_json_text-16            	   44750	     51718 ns/op	   24662 B/op	      17 allocs/op
+BenchmarkIssue_FormatMatrix/mldsa65_json_binary-16          	   88755	     28394 ns/op	    8670 B/op	      10 allocs/op
+BenchmarkIssue_FormatMatrix/mldsa65_cbor_text-16            	   64440	     54467 ns/op	   24398 B/op	      17 allocs/op
+BenchmarkIssue_FormatMatrix/mldsa65_cbor_binary-16          	   35336	    206402 ns/op	    8552 B/op	      10 allocs/op
+BenchmarkIssue_FormatMatrix/hybrid-mldsa65_json_text-16     	   27348	     94401 ns/op	   34259 B/op	      77 allocs/op
+BenchmarkIssue_FormatMatrix/hybrid-mldsa65_json_binary-16   	   21834	    121027 ns/op	   18235 B/op	      70 allocs/op
+BenchmarkIssue_FormatMatrix/hybrid-mldsa65_cbor_text-16     	   10000	    475049 ns/op	   34012 B/op	      77 allocs/op
+BenchmarkIssue_FormatMatrix/hybrid-mldsa65_cbor_binary-16   	   27192	     84326 ns/op	   18127 B/op	      70 allocs/op
+BenchmarkValidate_FormatMatrix/ecdsa-p256_json_text-16      	   55017	     42471 ns/op	    3072 B/op	      37 allocs/op
+BenchmarkValidate_FormatMatrix/ecdsa-p256_json_binary-16    	   57778	     42206 ns/op	    2288 B/op	      32 allocs/op
+BenchmarkValidate_FormatMatrix/ecdsa-p256_cbor_text-16      	   57872	     41474 ns/op	    2624 B/op	      33 allocs/op
+BenchmarkValidate_FormatMatrix/ecdsa-p256_cbor_binary-16    	   58015	     40996 ns/op	    2000 B/op	      28 allocs/op
+BenchmarkValidate_FormatMatrix/mldsa65_json_text-16         	   83388	     26817 ns/op	   10752 B/op	      30 allocs/op
+BenchmarkValidate_FormatMatrix/mldsa65_json_binary-16       	  162003	     15415 ns/op	    2144 B/op	      25 allocs/op
+BenchmarkValidate_FormatMatrix/mldsa65_cbor_text-16         	  109076	     27776 ns/op	   10416 B/op	      26 allocs/op
+BenchmarkValidate_FormatMatrix/mldsa65_cbor_binary-16       	  174999	     14042 ns/op	    1872 B/op	      21 allocs/op
+BenchmarkValidate_FormatMatrix/hybrid-mldsa65_json_text-16  	   36042	     67571 ns/op	   11624 B/op	      45 allocs/op
+BenchmarkValidate_FormatMatrix/hybrid-mldsa65_json_binary-16         	   38131	     63231 ns/op	    3000 B/op	      40 allocs/op
+BenchmarkValidate_FormatMatrix/hybrid-mldsa65_cbor_text-16           	   36705	     65292 ns/op	   11288 B/op	      41 allocs/op
+BenchmarkValidate_FormatMatrix/hybrid-mldsa65_cbor_binary-16         	   41750	     57079 ns/op	    2728 B/op	      36 allocs/op
+BenchmarkParse_FormatMatrix/ecdsa-p256_json_text-16                  	  662841	      5794 ns/op	    2496 B/op	      27 allocs/op
+BenchmarkParse_FormatMatrix/ecdsa-p256_json_binary-16                	  664963	      4216 ns/op	    1712 B/op	      22 allocs/op
+BenchmarkParse_FormatMatrix/ecdsa-p256_cbor_text-16                  	  690422	      4529 ns/op	    2048 B/op	      23 allocs/op
+BenchmarkParse_FormatMatrix/ecdsa-p256_cbor_binary-16                	  802143	      3542 ns/op	    1424 B/op	      18 allocs/op
+BenchmarkParse_FormatMatrix/mldsa65_json_text-16                     	  127212	     20125 ns/op	   10304 B/op	      27 allocs/op
+BenchmarkParse_FormatMatrix/mldsa65_json_binary-16                   	  907742	      4440 ns/op	    1696 B/op	      22 allocs/op
+BenchmarkParse_FormatMatrix/mldsa65_cbor_text-16                     	   97309	     20932 ns/op	    9968 B/op	      23 allocs/op
+BenchmarkParse_FormatMatrix/mldsa65_cbor_binary-16                   	  890114	      3767 ns/op	    1424 B/op	      18 allocs/op
+BenchmarkParse_FormatMatrix/hybrid-mldsa65_json_text-16              	  128530	     20279 ns/op	   10360 B/op	      27 allocs/op
+BenchmarkParse_FormatMatrix/hybrid-mldsa65_json_binary-16            	  520800	      4122 ns/op	    1736 B/op	      22 allocs/op
+BenchmarkParse_FormatMatrix/hybrid-mldsa65_cbor_text-16              	  171610	     20144 ns/op	   10016 B/op	      23 allocs/op
+BenchmarkParse_FormatMatrix/hybrid-mldsa65_cbor_binary-16            	  735446	      3622 ns/op	    1456 B/op	      18 allocs/op
+BenchmarkIssue_PQAT_ECDSA-16                                         	   94339	     26313 ns/op	    8365 B/op	      72 allocs/op
+BenchmarkIssue_JWT_ES256-16                                          	   87510	     25585 ns/op	    9122 B/op	      95 allocs/op
+BenchmarkIssue_PQAT_MLDSA65-16                                       	   47503	     87187 ns/op	   24660 B/op	      17 allocs/op
+BenchmarkIssue_PQAT_Hybrid65-16                                      	    9370	    247296 ns/op	   34256 B/op	      77 allocs/op
+BenchmarkValidate_PQAT_ECDSA-16                                      	   54146	     44006 ns/op	    3072 B/op	      37 allocs/op
+BenchmarkValidate_JWT_ES256-16                                       	   51271	     46658 ns/op	    4320 B/op	      78 allocs/op
+BenchmarkValidate_PQAT_MLDSA65-16                                    	  113551	     23430 ns/op	   10752 B/op	      30 allocs/op
+BenchmarkValidate_PQAT_Hybrid65-16                                   	   34844	     70181 ns/op	   11624 B/op	      45 allocs/op
+PASS
+ok  	pqt/internal/bench	152.344s

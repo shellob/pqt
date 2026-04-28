@@ -1,40 +1,103 @@
 # pqt — постквантовый токен доступа
 
-Прототип формата **PQ-AT** (Post-Quantum Access Token) — постквантовая замена
-JWT с гибридной схемой подписи (ECDSA P-256 + ML-DSA-65) и компактным
-CBOR-кодированием.
+Прототип формата **PQ-AT** (Post-Quantum Access Token) — постквантовая
+замена JWT с гибридной схемой подписи (ECDSA P-256 + ML-DSA-65) и
+компактным CBOR-кодированием. Реализация главы 3 и экспериментальная
+база главы 4 магистерской диссертации **«Построение токена постквантового
+доступа»** (Тимофеенко С. В., ВГУ ФКН, 2026).
 
-Реализация главы 3 и экспериментальная база главы 4 магистерской диссертации
-**«Построение токена постквантового доступа»** (Тимофеенко С. В., ВГУ ФКН, 2026).
+## Зачем
 
-## О формате
+JWT — самый распространённый сегодня формат токена доступа в OAuth, и
+подпись там обычно ставится либо на эллиптической кривой (ES256), либо на
+RSA. Обе эти схемы математически держатся на задачах, которые квантовый
+компьютер достаточного размера решает за полиномиальное время — а значит,
+рано или поздно перестанут быть безопасными.
 
-PQ-AT по структуре повторяет JWT (`Header.Payload.Signature`), но добавляет:
+Алгоритм ML-DSA (FIPS 204, 2024) специально стандартизован NIST как
+постквантовый аналог ECDSA. Но переход на «чистую» постквантовую схему
+рискованный: ML-DSA молодой, у криптоаналитиков было меньше времени найти
+в нём слабые места. Поэтому промышленный путь — **гибрид**: подписываем
+один и тот же токен сразу двумя ключами, ECDSA и ML-DSA, и принимаем его
+только если обе подписи валидны. Если в будущем сломают одну из схем,
+вторая всё равно держит.
 
-- **Три режима подписи**, переключаемые полем `alg` в заголовке:
-  - `ecdsa-p256` — классическая ECDSA на кривой P-256 (для обратной
-    совместимости и в качестве классической части гибрида);
-  - `mldsa44` / `mldsa65` / `mldsa87` — постквантовая ML-DSA трёх уровней
-    стойкости (FIPS 204), целевой — `mldsa65`;
-  - `hybrid-ecdsa-mldsa44/65/87` — гибрид с двумя подписями над одним
-    сообщением и параллельной верификацией (целевой — `hybrid-ecdsa-mldsa65`).
-- **Два кодека payload**: JSON со строковыми именами полей (RFC 7519)
-  или CBOR с целочисленными ключами в стиле CWT (RFC 8392).
-- **Два формата сериализации**: текстовый, совместимый с JWT
-  (`Base64url(H).Base64url(P).Base64url(Sig)`), или компактный бинарный
-  (`[2 байта длины H] H [2 байта длины P] P [подпись]`) — на 25% меньше
-  по размеру за счёт устранения накладных расходов Base64url.
+Этот репозиторий — рабочий прототип такого формата токена, два OAuth-сервера
+(авторизация и ресурсы) поверх него, CLI-утилита, эталонный JWT для сравнения
+и набор бенчмарков под главы 4.2–4.6 диссертации.
 
-Целевой компактный размер постквантового токена при CBOR + binary —
-около 3.5 КБ (укладывается в стандартные ограничения HTTP-заголовков
-8 КБ у Apache/Nginx).
+## Что внутри формата
 
-Полная спецификация формата — раздел 2 диссертации;
-архитектура реализации — [docs/architecture.md](docs/architecture.md).
+PQ-AT по структуре повторяет JWT (три части `Header.Payload.Signature`),
+но заголовок и payload расширены, чтобы поддерживать постквантовые алгоритмы
+и компактный бинарный формат:
 
-## Состояние
+- **Заголовок (Header)** — служебные поля: `alg` (какой алгоритм подписи),
+  `kid` (идентификатор ключа — нужен для плавной ротации, см. ниже), `enc`
+  (как закодирован payload — JSON или CBOR), `typ`, `ver`.
+- **Payload — claims** — стандартные для JWT поля: `sub` (subject,
+  кто пользователь), `iss` (issuer, кто выпустил токен), `aud` (audience,
+  кому предназначен), `exp` (expiry, до какого момента валиден),
+  `iat` (issued at), `jti` (уникальный id токена), `scope` (список прав
+  через пробел: «read write admin»). Дополнительно — `kind`: помечает
+  токен как access или refresh, чтобы при отзыве сервер сразу знал, что
+  именно отзывать.
+- **Подпись** — байты, полученные подписью склейки `Header || Payload`
+  приватным ключом. У гибрида сюда кладутся обе подписи подряд.
 
-План работы (14 этапов) закрыт целиком. Прогресс — [docs/plan.md](docs/plan.md).
+Дальше формат добавляет три «оси выбора»:
+
+**Алгоритм (поле `alg`):**
+
+- `ecdsa-p256` — классическая ECDSA на кривой P-256. Для обратной
+  совместимости и как классическая часть гибрида. Подпись 64–72 байта.
+- `mldsa44` / `mldsa65` / `mldsa87` — постквантовая ML-DSA трёх уровней
+  стойкости (соответствуют NIST security level 2/3/5). Подписи: 2420 /
+  3309 / 4627 байт. Целевой для прототипа — `mldsa65`.
+- `hybrid-ecdsa-mldsa44/65/87` — гибрид: на одно сообщение ставятся обе
+  подписи, при проверке верификации идут параллельно через `errgroup`.
+
+**Кодек payload (поле `enc`):**
+
+- `json` — стандартный JWT-совместимый путь.
+- `cbor` — бинарная альтернатива JSON (RFC 8949). Поля идут с
+  целочисленными ключами в стиле CWT (RFC 8392, 1=sub, 2=iss, …) и без
+  пробелов и кавычек. На типовых claims даёт 2–20% экономии.
+
+**Формат сериализации:**
+
+- **Текстовый**, совместимый с JWT: `Base64url(H).Base64url(P).Base64url(Sig)`.
+  Помещается в HTTP-заголовок `Authorization: Bearer ...`.
+- **Бинарный**, компактный: `[2 байта len(H)] H [2 байта len(P)] P Sig`.
+  На 25% меньше за счёт устранения накладных расходов Base64url
+  (4/3 ≈ 1.33).
+
+Целевой компактный размер постквантового токена при `mldsa65` + CBOR + binary —
+около 3.5 КБ. Это укладывается в стандартный лимит HTTP-заголовков 8 КБ
+у Apache/Nginx.
+
+Полная спецификация формата — раздел 2 диссертации; архитектура
+реализации — [docs/architecture.md](docs/architecture.md).
+
+## Что демонстрирует проект
+
+| Слой | Файлы | Что покрывает |
+|---|---|---|
+| Криптослой | `keys/` | ECDSA P-256, ML-DSA-44/65/87 через `cloudflare/circl`, гибрид с параллельной верификацией |
+| JWK | `jwk/` | сериализация ключей в JSON Web Key + JWK Set, расширения `kty=MLDSA` и `kty=Hybrid` |
+| Формат токена | `token/` | заголовок и claims, два кодека (JSON/CBOR), два формата (текст/бинарь) |
+| Issue/Validate | корневой `pqt` | публичный API + защиты: проверка `alg` ДО верификации (alg-confusion), обязательный `exp`, отзыв через `IsRevoked` |
+| Fuzz-тесты | `pqt/*_fuzz_test.go` | 4 fuzz-цели на разбор text/binary и валидацию |
+| CLI | `cmd/pqt-cli` | `keygen` / `sign` / `verify` / `decode` на stdlib `flag`; e2e-матрица 5 alg × 2 codec × 2 format = 20 комбинаций |
+| OAuth-сервер | `internal/authserver`, `cmd/pqt-authserver` | password grant, refresh rotation, RFC 7009 revoke, RFC 8414 discovery, JWKS, pprof |
+| Resource-сервер | `internal/resourceserver`, `cmd/pqt-resource` | middleware `RequireValidToken` + `RequireScope`, JWKS-клиент с авто-refresh при cache-miss (покрывает ротацию ключей) |
+| Web UI | `internal/authserver/webui` | vanilla HTML/JS-страница (login/refresh/revoke/decode), вшита через `//go:embed` |
+| Swagger UI | `internal/authserver/webui.go` | offline через `swgui/v5`, без обращений к CDN |
+| OpenAPI 3.1 | `internal/openapi`, `cmd/pqt-openapi-gen` | code-first; YAML генерится в `api/openapi.yaml` и в embed для сервера |
+| Эталонный JWT | `internal/jwtbase` | `golang-jwt/jwt/v5` с фиксированным ES256 — точка отсчёта для главы 4.3 |
+| Бенчмарки | `internal/bench`, `keys/hybrid_test.go`, `token/cbor_libs_bench_test.go` | главы 4.2–4.6: производительность ML-DSA, PQ-AT vs JWT, hybrid seq vs parallel, формат-матрица, нагрузочное тестирование через `vegeta` |
+
+Все 14 этапов плана из [docs/plan.md](docs/plan.md) закрыты.
 
 ## Стек
 
@@ -98,62 +161,52 @@ pqt/
 ├── api/
 │   └── openapi.yaml         # сгенерированная OpenAPI 3.1-спецификация
 │
-├── docs/
-│   ├── plan.md              # план работы (14 этапов)
-│   ├── architecture.md      # архитектурный документ для раздела 3.1 ВКР
-│   ├── bench_crypto.md      # цифры для глав 4.2, 4.3, 4.4
-│   ├── bench_format_matrix.md  # цифры для главы 4.5
-│   ├── bench_cbor_libs.md   # сравнение CBOR-либ для главы 4.5
-│   └── bench_load.md        # шаблон таблиц и инструкции для главы 4.6
-│
-└── test/                    # вспомогательные тестовые сценарии (если появятся)
+└── docs/
+    ├── plan.md              # план работы (14 этапов)
+    ├── architecture.md      # архитектурный документ для раздела 3.1 ВКР
+    ├── bench_crypto.md      # цифры для глав 4.2, 4.3, 4.4
+    ├── bench_format_matrix.md  # цифры для главы 4.5
+    ├── bench_cbor_libs.md   # сравнение CBOR-либ для главы 4.5
+    └── bench_load.md        # шаблон таблиц и инструкции для главы 4.6
 ```
 
-## Запуск
+## Быстрый старт
 
-### Минимальная проверка — все тесты
+Минимум, чтобы убедиться, что всё работает локально:
 
 ```bash
+# 1. Прогнать все тесты
 go test ./...
-```
 
-Должно показать `ok` для всех 11 пакетов
-(`pqt`, `pqt/keys`, `pqt/jwk`, `pqt/token`, `pqt/cmd/pqt-cli`,
-`pqt/internal/authserver`, `pqt/internal/resourceserver`, `pqt/internal/jwtbase`,
-`pqt/internal/openapi`, `pqt/internal/bench`).
-
-### Демо в браузере
-
-В одном терминале запусти сервер авторизации:
-
-```bash
+# 2. Поднять auth-сервер
 go run ./cmd/pqt-authserver
 ```
 
-Открой в браузере:
+После второй команды открой <http://localhost:8080/> — там форма
+логина / refresh / revoke / decode и кнопки JWKS / discovery. На
+<http://localhost:8080/docs/> лежит интерактивный Swagger UI.
 
-| Адрес | Что покажет |
-|---|---|
-| <http://localhost:8080/> | главную страницу демо с формами login / refresh / revoke / decode + кнопками JWKS и discovery |
-| <http://localhost:8080/docs/> | Swagger UI с интерактивной документацией всех эндпоинтов |
-| <http://localhost:8080/.well-known/pq-jwks> | JWK Set с публичными ключами сервера |
-| <http://localhost:8080/.well-known/oauth-authorization-server> | метаданные сервера по RFC 8414 |
+Seed-пользователи (хардкод в коде, для демо):
 
-В seed-наборе четыре пользователя:
-`alice`/`alice-password-2026` (scope `read write`),
-`bob`/`bob-password-2026` (`read`),
-`charlie`/`charlie-password-2026` (`read write admin`),
-`dave`/`dave-password-2026` (`read`).
+| Логин | Пароль | scope |
+|---|---|---|
+| `alice` | `alice-password-2026` | `read write` |
+| `bob` | `bob-password-2026` | `read` |
+| `charlie` | `charlie-password-2026` | `read write admin` |
+| `dave` | `dave-password-2026` | `read` |
+
+## Запуск всех сценариев
 
 ### Полный сценарий с двумя серверами
 
-Терминал 1 — сервер авторизации:
+Терминал 1 — сервер авторизации (выпускает токены):
 
 ```bash
 go run ./cmd/pqt-authserver
 ```
 
-Терминал 2 — сервер ресурсов:
+Терминал 2 — сервер ресурсов (проверяет токены и пускает на защищённые
+эндпоинты):
 
 ```bash
 PQT_AUTH_BASE_URL=http://localhost:8080 \
@@ -165,7 +218,7 @@ go run ./cmd/pqt-resource
 Терминал 3 — обращения к API:
 
 ```bash
-# Получить пару access + refresh
+# Получить пару access + refresh (без jq — сразу глазами видно)
 curl -s -X POST http://localhost:8080/auth/token \
   -d "grant_type=password&username=charlie&password=charlie-password-2026"
 
@@ -179,6 +232,10 @@ curl -s http://localhost:8081/admin  -H "Authorization: Bearer $ACCESS"
 ```
 
 ### Через CLI без сервера
+
+Все четыре подкоманды работают с любым алгоритмом из формата (`ecdsa-p256`,
+`mldsa44/65/87`, `hybrid-ecdsa-mldsa44/65/87`) и любым сочетанием кодек ×
+формат:
 
 ```bash
 # 1. Сгенерировать пару ключей
@@ -208,32 +265,36 @@ go run ./cmd/pqt-cli verify \
   --key ./demo-keys/demo-1.pub.jwk.json \
   --token token.txt
 
-# 5. Посмотреть содержимое без проверки
+# 5. Посмотреть содержимое без проверки подписи (для отладки)
 go run ./cmd/pqt-cli decode --token token.txt
 ```
 
-Подкоманды CLI: `keygen`, `sign`, `verify`, `decode`. У каждой есть `-h`
-со справкой по флагам.
+У каждой подкоманды есть `-h` со справкой по флагам.
 
 ### Нагрузочный прогон (для главы 4.6)
 
+Сервер должен быть запущен с включённым профайлером — иначе эндпоинты
+`/debug/pprof/*` отключены:
+
 ```bash
-# Сервер с включённым профайлером
 go run ./cmd/pqt-authserver --debug
 
-# В другом терминале
+# В другом терминале — два сценария
 go run ./cmd/pqt-loadtest --scenario token --rate 100 --duration 30s
 go run ./cmd/pqt-loadtest --scenario me    --rate 500 --duration 30s
 
-# Параллельно — CPU-профиль
+# Параллельно — снять CPU-профиль
 go tool pprof -http=:6060 http://localhost:8080/debug/pprof/profile?seconds=30
 ```
 
-Подробнее — [docs/bench_load.md](docs/bench_load.md).
+Сценарий `token` грузит выпуск токенов (узкое место — bcrypt при
+проверке пароля), сценарий `me` грузит проверку токенов на
+resource-сервере (узкое место — верификация подписи). Подробнее —
+[docs/bench_load.md](docs/bench_load.md).
 
 ### Регенерация OpenAPI-спецификации
 
-После любых правок в `internal/openapi/spec.go`:
+Делается после правок в `internal/openapi/spec.go`:
 
 ```bash
 go run ./cmd/pqt-openapi-gen
@@ -241,7 +302,8 @@ go run ./cmd/pqt-openapi-gen
 
 Команда обновляет два файла одновременно:
 [`api/openapi.yaml`](api/openapi.yaml) (для документации) и
-`internal/authserver/webui/openapi.yaml` (для embed в сервер).
+`internal/authserver/webui/openapi.yaml` (для embed в auth-сервер,
+чтобы Swagger UI не ходил никуда лишнего).
 
 ### Бенчмарки
 
@@ -252,10 +314,10 @@ go test -bench=. -benchmem -run=^$ -benchtime=2s ./keys/...
 # PQ-AT vs JWT (глава 4.3)
 go test -bench=. -benchmem -run=^$ -benchtime=2s ./internal/bench/...
 
-# Сравнение CBOR-либ (глава 4.5)
+# Сравнение CBOR-либ — fxamacker/cbor vs ugorji/go (глава 4.5)
 go test -bench=BenchmarkCBOR -benchmem -run=^$ -benchtime=2s ./token/...
 
-# Размеры токенов
+# Размеры токенов в виде таблиц
 go test -v -run=TestFormatMatrix_Sizes ./internal/bench/...
 go test -v -run=TestPQATvsJWT_Sizes    ./internal/bench/...
 go test -v -run=TestMLDSASignatureSizes ./keys/...
@@ -265,10 +327,13 @@ go test -v -run=TestMLDSASignatureSizes ./keys/...
 
 ### Fuzz-тесты
 
+Каждая цель поднимает рандомные входы на 30 секунд и проверяет, что парсер
+не падает с panic'ом и не возвращает чушь:
+
 ```bash
-go test -run=^$ -fuzz=FuzzParseText    -fuzztime=30s .
-go test -run=^$ -fuzz=FuzzParseBinary  -fuzztime=30s .
-go test -run=^$ -fuzz=FuzzValidateText -fuzztime=30s .
+go test -run=^$ -fuzz=FuzzParseText      -fuzztime=30s .
+go test -run=^$ -fuzz=FuzzParseBinary    -fuzztime=30s .
+go test -run=^$ -fuzz=FuzzValidateText   -fuzztime=30s .
 go test -run=^$ -fuzz=FuzzValidateBinary -fuzztime=30s .
 ```
 
@@ -291,9 +356,9 @@ go mod tidy
 | `PQT_KEYS_DIR` | `./keys` | директория с приватными ключами JWK |
 | `PQT_DEFAULT_KID` | первый по алфавиту | какой ключ использовать для подписи |
 | `PQT_ACCESS_TTL` | `15m` | время жизни access-токена |
-| `PQT_REFRESH_TTL` | `720h` | время жизни refresh-токена |
+| `PQT_REFRESH_TTL` | `720h` | время жизни refresh-токена (30 дней) |
 | `PQT_GENERATE_ALG` | `hybrid-ecdsa-mldsa65` | алгоритм для авто-генерации ключа на первом старте |
-| `PQT_BCRYPT_COST` | `10` | сложность bcrypt для seed-юзеров |
+| `PQT_BCRYPT_COST` | `10` | сложность bcrypt для seed-юзеров (≈60 мс на проверку) |
 | `PQT_DEBUG` | `0` | включить `/debug/pprof/*` (то же что `--debug`) |
 
 ### `pqt-resource`
@@ -304,7 +369,7 @@ go mod tidy
 | `PQT_AUTH_BASE_URL` | `http://localhost:8080` | базовый URL `pqt-authserver` для скачивания JWKS |
 | `PQT_RESOURCE_ISSUER` | `=AUTH_BASE_URL` | ожидаемое значение `iss` |
 | `PQT_RESOURCE_AUDIENCE` | (пусто) | ожидаемое значение `aud` (если пусто, проверка пропускается) |
-| `PQT_RESOURCE_LEEWAY` | `0s` | допуск рассинхронизации часов |
+| `PQT_RESOURCE_LEEWAY` | `0s` | допустимая разница часов с auth-сервером |
 | `PQT_RESOURCE_JWKS_REFRESH` | `5m` | интервал фонового обновления JWKS |
 | `PQT_RESOURCE_HTTP_TIMEOUT` | `5s` | таймаут на JWKS-запросы |
 

@@ -1,0 +1,36 @@
+﻿=== RUN   TestFormatMatrix_Sizes
+    format_matrix_test.go:188: 
+        Размеры токена для всех точек формат-матрицы:
+    format_matrix_test.go:189:   Сценарий                                 Байт
+    format_matrix_test.go:191:   ecdsa-p256_json_text                     386
+    format_matrix_test.go:191:   ecdsa-p256_json_binary                   291
+    format_matrix_test.go:191:   ecdsa-p256_cbor_text                     309
+    format_matrix_test.go:191:   ecdsa-p256_cbor_binary                   233
+    format_matrix_test.go:191:   mldsa65_json_text                        4699
+    format_matrix_test.go:191:   mldsa65_json_binary                      3526
+    format_matrix_test.go:191:   mldsa65_cbor_text                        4622
+    format_matrix_test.go:191:   mldsa65_cbor_binary                      3468
+    format_matrix_test.go:191:   hybrid-mldsa65_json_text                 4812
+    format_matrix_test.go:191:   hybrid-mldsa65_json_binary               3612
+    format_matrix_test.go:191:   hybrid-mldsa65_cbor_text                 4735
+    format_matrix_test.go:191:   hybrid-mldsa65_cbor_binary               3554
+--- PASS: TestFormatMatrix_Sizes (0.00s)
+=== RUN   TestPQATvsJWT_Sizes
+    pqat_vs_jwt_bench_test.go:328: 
+        Размеры выпущенных токенов на одном и том же наборе claims:
+    pqat_vs_jwt_bench_test.go:329:   Формат                                   Байт
+    pqat_vs_jwt_bench_test.go:331:   JWT (ES256)                              342
+    pqat_vs_jwt_bench_test.go:331:   PQ-AT ecdsa-p256 (json/text)             387
+    pqat_vs_jwt_bench_test.go:331:   PQ-AT mldsa65 (json/text)                4699
+    pqat_vs_jwt_bench_test.go:331:   PQ-AT hybrid-mldsa65 (json/text)         4815
+    pqat_vs_jwt_bench_test.go:331:   PQ-AT mldsa65 (cbor/binary)              3468
+--- PASS: TestPQATvsJWT_Sizes (0.00s)
+PASS
+ok  	pqt/internal/bench	(cached)
+=== RUN   TestMLDSASignatureSizes
+    mldsa_sizes_test.go:26: mldsa44   подпись=2420 байт, публичный ключ=1312 байт
+    mldsa_sizes_test.go:26: mldsa65   подпись=3309 байт, публичный ключ=1952 байт
+    mldsa_sizes_test.go:26: mldsa87   подпись=4627 байт, публичный ключ=2592 байт
+--- PASS: TestMLDSASignatureSizes (0.00s)
+PASS
+ok  	pqt/keys	(cached)

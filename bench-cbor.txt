@@ -1,0 +1,14 @@
+﻿goos: windows
+goarch: amd64
+pkg: pqt/token
+cpu: AMD Ryzen 7 9800X3D 8-Core Processor           
+BenchmarkCBOREncode_Fxamacker_Claims-16    	16565010	       148.4 ns/op	     112 B/op	       1 allocs/op
+BenchmarkCBOREncode_Ugorji_Claims-16       	 5866796	       436.4 ns/op	     824 B/op	       7 allocs/op
+BenchmarkCBORDecode_Fxamacker_Claims-16    	 5473453	       394.1 ns/op	     200 B/op	       6 allocs/op
+BenchmarkCBORDecode_Ugorji_Claims-16       	 7040439	       352.4 ns/op	     840 B/op	       7 allocs/op
+BenchmarkCBOREncode_Fxamacker_MapInt-16    	 4556565	       510.5 ns/op	     160 B/op	       2 allocs/op
+BenchmarkCBOREncode_Ugorji_MapInt-16       	 6196346	       378.9 ns/op	     608 B/op	       6 allocs/op
+BenchmarkCBORDecode_Fxamacker_MapInt-16    	 2404788	      1001 ns/op	     472 B/op	      17 allocs/op
+BenchmarkCBORDecode_Ugorji_MapInt-16       	 2749372	       904.9 ns/op	    1104 B/op	      17 allocs/op
+PASS
+ok  	pqt/token	23.468s
